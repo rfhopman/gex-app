@@ -31,7 +31,7 @@ def get_risk_free_rate():
 
 # --- Sidebar Controls ---
 st.sidebar.title("⚡ GEX Controls")
-ticker_input = st.sidebar.text_input("Ticker", value="XSP").upper()
+ticker_input = st.sidebar.text_input("Ticker", value="^XSP").upper()
 strike_range = st.sidebar.slider("± Strikes from Spot", 5, 50, 20)
 
 # --- Data Fetching ---
