@@ -5,10 +5,9 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 
 # --- Setup Page Configuration ---
-st.set_page_config(page_title="GEX Mobile", layout="wide")
+st.set_page_config(page_title="GEX Mobile Dashboard", layout="wide")
 
 # --- Helpers ---
 def bs_gamma(S, K, T, r, iv):
@@ -22,30 +21,40 @@ def fmt_gex(v):
     if a >= 1e6: return f"{s}${a/1e6:.1f}M"
     return f"{s}${a:.0f}"
 
-@st.cache_data(ttl=3600)
+# --- NEW: Robust Risk-Free Rate Fetching ---
 def get_risk_free_rate():
     try:
-        irx = yf.Ticker("^IRX").fast_info
-        rate = irx.get("last_price", 4.0)
-        return rate / 100
-    except: return 0.04
+        irx = yf.Ticker("^IRX")
+        # Try fast_info first
+        rate = irx.fast_info.get("last_price")
+        if rate is None:
+            # Fallback to current history
+            h = irx.history(period="1d")
+            rate = h["Close"].iloc[-1] if not h.empty else 4.0
+        
+        # Yahoo returns IRX as 4.5 meaning 4.5%. We need 0.045 for the formula.
+        return float(rate) / 100
+    except Exception:
+        return 0.04  # Fallback if both methods fail
 
 # --- Sidebar Controls ---
 st.sidebar.header("⚙️ App Settings")
-ticker_input = st.sidebar.text_input("Ticker", value="^XSP").upper()
-strike_range = st.sidebar.slider("± Strikes from Spot", 5, 50, 20)
+ticker_input = st.sidebar.text_input("Ticker", value="XSP").upper()
+strike_range = st.sidebar.slider("± Strikes from Spot", 5, 50, 25)
 
 try:
     tk = yf.Ticker(ticker_input)
-    # Fetch Spot
+    # Fetch Spot Price
     spot = tk.fast_info.get("last_price") or tk.history(period="1d")["Close"].iloc[-1]
     
     # Fetch Expirations
     exps = tk.options
     selected_exp = st.sidebar.selectbox("Select Expiration", exps)
     
-    # Risk Free & Time Logic
+    # Get Live RF Rate
     risk_free = get_risk_free_rate()
+    
+    # Time Logic (0DTE Safe)
     now_ts = datetime.now(timezone.utc).timestamp()
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
@@ -56,12 +65,13 @@ try:
     # GEX Calculation Logic
     strike_map = {}
     for opt_type, df in [("call", chain.calls), ("put", chain.puts)]:
-        # Filter raw data to reasonable range to save memory
+        # Filter raw data to a reasonable range to save processing time
         df = df[(df['strike'] >= spot * 0.7) & (df['strike'] <= spot * 1.3)]
         for _, row in df.iterrows():
             K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
             if OI <= 1 or iv <= 0: continue
             
+            # BS Gamma * OI * Contract Multiplier * Spot (approx. dollar gamma)
             g = bs_gamma(spot, K, T, risk_free, iv)
             gex = g * OI * 100 * spot * spot * 0.01
             
@@ -70,7 +80,7 @@ try:
 
     df_plot = pd.DataFrame(strike_map.values()).sort_values("strike")
     
-    # Center view on Spot based on sidebar slider
+    # Center view on Spot based on slider
     idx = (df_plot['strike'] - spot).abs().idxmin()
     df_plot = df_plot.iloc[max(0, idx-strike_range): min(len(df_plot), idx+strike_range)]
 
@@ -79,11 +89,12 @@ try:
     call_wall = df_plot.loc[df_plot["netGEX"].idxmax(), "strike"]
     put_wall = df_plot.loc[df_plot["netGEX"].idxmin(), "strike"]
     
-    # --- Display UI ---
+    # --- UI Layout ---
     st.title(f"📊 {ticker_input} GEX")
-    st.info(f"Expiry: {selected_exp} | RF Rate: {risk_free:.4f}")
+    # Display the actual rate used for transparency
+    st.caption(f"Expiration: {selected_exp} | Dynamic RF Rate (^IRX): {risk_free*100:.3f}%")
     
-    # KPI Metrics Row
+    # KPI Grid
     m1, m2 = st.columns(2)
     m1.metric("Spot Price", f"${spot:.2f}")
     m2.metric("Net GEX", fmt_gex(net_total))
@@ -92,10 +103,8 @@ try:
     m3.metric("Call Wall", f"${call_wall}")
     m4.metric("Put Wall", f"${put_wall}")
 
-    # Interactive Plotly Chart
+    # Interactive Chart
     fig = go.Figure()
-    
-    # Add Gamma Bars
     fig.add_trace(go.Bar(
         x=df_plot["strike"], 
         y=df_plot["netGEX"],
@@ -112,7 +121,6 @@ try:
         template="plotly_dark", 
         height=600, 
         xaxis_title="Strike", 
-        yaxis_title="Total Gamma Exposure",
         margin=dict(l=10, r=10, t=10, b=10),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
@@ -120,5 +128,5 @@ try:
     st.plotly_chart(fig, use_container_width=True)
 
 except Exception as e:
-    st.warning("Enter a valid ticker in the sidebar to begin.")
-    st.error(f"Details: {e}")
+    st.warning("Enter a valid ticker in the sidebar or check your internet connection.")
+    st.error(f"Error: {e}")
