@@ -33,10 +33,11 @@ def get_risk_free_rate():
 # --- TOP ROW CONTROLS ---
 st.title("📊 GEX DASHBOARD")
 
-ctrl_col1, ctrl_col2 = st.columns([1, 2])
+# Adjusting columns to fit the refresh button
+ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 2, 0.5])
 
 with ctrl_col1:
-    ticker_input = st.text_input("Ticker", value="^XSP").upper()
+    ticker_input = st.text_input("Ticker", value="XSP").upper()
 
 with ctrl_col2:
     strike_option = st.radio(
@@ -45,6 +46,12 @@ with ctrl_col2:
         index=2,
         horizontal=True
     )
+
+with ctrl_col3:
+    st.write("") # Spacer to align with radio buttons
+    if st.button("🔄 Refresh"):
+        st.cache_data.clear()
+        st.rerun()
 
 try:
     search_ticker = ticker_input
@@ -94,7 +101,7 @@ try:
     df_main = pd.DataFrame(main_list)
     df_agg = df_main.groupby("strike")["gex"].sum().reset_index().sort_values("strike")
 
-    # --- Gamma Flip Calculation ---
+    # Gamma Flip
     gamma_flip = None
     for i in range(len(df_agg)-1):
         g1, g2 = df_agg.iloc[i]["gex"], df_agg.iloc[i+1]["gex"]
@@ -110,16 +117,18 @@ try:
         for exp in heatmap_exps:
             e_ts = datetime.strptime(exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
             T_heat = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
-            c = tk.option_chain(exp)
-            for opt_type, df_h in [("Call", c.calls), ("Put", c.puts)]:
-                if df_h.empty: continue
-                df_h = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
-                for _, row in df_h.iterrows():
-                    K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
-                    if OI <= 1 or iv <= 0: continue
-                    g = bs_gamma(spot, K, T_heat, risk_free, iv)
-                    gex = g * OI * 100 * spot * spot * 0.01
-                    heatmap_list.append({"expiry": exp, "strike": K, "netGEX": gex if opt_type == "Call" else -gex})
+            try:
+                c = tk.option_chain(exp)
+                for opt_type, df_h in [("Call", c.calls), ("Put", c.puts)]:
+                    if df_h.empty: continue
+                    df_h = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
+                    for _, row in df_h.iterrows():
+                        K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
+                        if OI <= 1 or iv <= 0: continue
+                        g = bs_gamma(spot, K, T_heat, risk_free, iv)
+                        gex = g * OI * 100 * spot * spot * 0.01
+                        heatmap_list.append({"expiry": exp, "strike": K, "netGEX": gex if opt_type == "Call" else -gex})
+            except: continue
         
         df_heat_long = pd.DataFrame(heatmap_list)
         df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
