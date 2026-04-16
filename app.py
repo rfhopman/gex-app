@@ -33,13 +33,19 @@ def get_risk_free_rate():
 # --- TOP ROW CONTROLS ---
 st.title("📊 GEX DASHBOARD")
 
-ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 1])
+ctrl_col1, ctrl_col2 = st.columns([1, 2])
 
 with ctrl_col1:
     ticker_input = st.text_input("Ticker", value="XSP").upper()
 
 with ctrl_col2:
-    strike_option = st.selectbox("Strikes", options=[10, 20, 40, 60, "All"], index=2)
+    # Changed to Radio Buttons for better mobile UX
+    strike_option = st.radio(
+        "Strikes to View", 
+        options=[10, 20, 40, 60, "All"], 
+        index=2,
+        horizontal=True
+    )
 
 try:
     search_ticker = ticker_input
@@ -65,8 +71,8 @@ try:
         st.error("Could not fetch option chain.")
         st.stop()
 
-    with ctrl_col3:
-        selected_exp = st.selectbox("Expiration", exps)
+    # Expiration remains a dropdown as there are usually too many for radio buttons
+    selected_exp = st.selectbox("Expiration Date", exps)
 
     # --- DATA PROCESSING ---
     risk_free = get_risk_free_rate()
@@ -111,7 +117,7 @@ try:
     net_total = df_plot["netGEX"].sum()
     call_wall = df_plot.loc[df_plot["netGEX"].idxmax(), "strike"]
     put_wall = df_plot.loc[df_plot["netGEX"].idxmin(), "strike"]
-    regime = "Positive" if net_total >= 0 else "Negative"
+    regime = "POS" if net_total >= 0 else "NEG"
     regime_color = "#4db6ac" if net_total >= 0 else "#e57373"
     
     # --- CONSOLIDATED METRICS HEADER ---
@@ -121,8 +127,7 @@ try:
     m2.metric("Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
     m3.metric("Net GEX", fmt_gex(net_total))
     m4.metric("Call-Wall", f"${call_wall:.2f}")
-    # Regime placed next to Call Wall
-    m5.metric("Regime", regime, delta=None, delta_color="normal") 
+    m5.metric("Regime", regime) 
     m6.metric("Put-Wall", f"${put_wall:.2f}")
 
     # --- Chart ---
@@ -134,16 +139,24 @@ try:
         name="Net GEX"
     ))
 
+    # SPOT LINE: SOLID BLACK
     fig.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
+    
     if gamma_flip:
         fig.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
+    
     fig.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="Call-Wall")
     fig.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="Put-Wall")
 
-    fig.update_layout(template="plotly_dark", height=600, margin=dict(l=10, r=10, t=30, b=10))
+    fig.update_layout(
+        template="plotly_dark", 
+        height=600, 
+        margin=dict(l=10, r=10, t=30, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
     st.plotly_chart(fig, use_container_width=True)
     
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
-    st.info("Enter ticker data to begin.")
+    st.info("Please enter a ticker above to load the dashboard.")
