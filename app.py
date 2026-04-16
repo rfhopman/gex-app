@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 # --- Setup Page Configuration ---
 st.set_page_config(page_title="GEX Mobile Pro", layout="wide")
@@ -21,7 +22,7 @@ def fmt_gex(v):
     if a >= 1e6: return f"{s}${a/1e6:.1f}M"
     return f"{s}${a:.0f}"
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def get_risk_free_rate():
     try:
         irx = yf.Ticker("^IRX")
@@ -31,7 +32,7 @@ def get_risk_free_rate():
 
 # --- Sidebar Controls ---
 st.sidebar.header("⚙️ App Settings")
-ticker_input = st.sidebar.text_input("Ticker", value="^XSP").upper()
+ticker_input = st.sidebar.text_input("Ticker", value="XSP").upper()
 
 strike_option = st.sidebar.selectbox(
     "Number of Strikes", 
@@ -41,6 +42,15 @@ strike_option = st.sidebar.selectbox(
 
 try:
     tk = yf.Ticker(ticker_input)
+    
+    # --- GET YAHOO MARKET TIME ---
+    # fast_info.last_price_timestamp gives UTC; convert to US/Eastern
+    raw_ts = tk.fast_info.get("last_price_timestamp")
+    if raw_ts:
+        market_time = datetime.fromtimestamp(raw_ts, tz=timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%I:%M:%S %p EST")
+    else:
+        market_time = "N/A"
+
     spot = tk.fast_info.get("last_price") or tk.history(period="1d")["Close"].iloc[-1]
     exps = tk.options
     selected_exp = st.sidebar.selectbox("Select Expiration", exps)
@@ -52,7 +62,7 @@ try:
     
     chain = tk.option_chain(selected_exp)
     
-    # --- Calculate GEX for this Expiration ---
+    # --- Calculate GEX ---
     strike_map = {}
     for opt_type, df in [("call", chain.calls), ("put", chain.puts)]:
         df = df[(df['strike'] >= spot * 0.7) & (df['strike'] <= spot * 1.3)]
@@ -66,7 +76,7 @@ try:
 
     df_plot = pd.DataFrame(strike_map.values()).sort_values("strike")
     
-    # --- Gamma Flip Logic (Linear Interpolation) ---
+    # --- Gamma Flip Logic ---
     gamma_flip = None
     for i in range(len(df_plot)-1):
         if df_plot.iloc[i]["netGEX"] * df_plot.iloc[i+1]["netGEX"] < 0:
@@ -79,7 +89,9 @@ try:
     if strike_option != "All":
         idx = (df_plot['strike'] - spot).abs().idxmin()
         half = strike_option // 2
-        df_plot = df_plot.iloc[max(0, idx-half): min(len(df_plot), idx+half)]
+        df_plot_view = df_plot.iloc[max(0, idx-half): min(len(df_plot), idx+half)]
+    else:
+        df_plot_view = df_plot
 
     # Metrics
     net_total = df_plot["netGEX"].sum()
@@ -91,14 +103,11 @@ try:
     # --- UI Layout ---
     st.title(f"📊 {ticker_input} GEX")
     
-    # Metrics Panel
     c1, c2 = st.columns(2)
     c1.metric("Spot Price", f"${spot:.2f}")
     c1.metric("Gamma Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
-    
     c2.metric("Net GEX", fmt_gex(net_total))
     c2.metric("Call Wall", f"${call_wall:.2f}")
-    
     st.metric("Put Wall", f"${put_wall:.2f}")
 
     # Regime Card
@@ -112,29 +121,23 @@ try:
     # Interactive Chart
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=df_plot["strike"], 
-        y=df_plot["netGEX"],
-        marker_color=np.where(df_plot["netGEX"] >= 0, "#4db6ac", "#e57373"),
+        x=df_plot_view["strike"], 
+        y=df_plot_view["netGEX"],
+        marker_color=np.where(df_plot_view["netGEX"] >= 0, "#4db6ac", "#e57373"),
         name="Net GEX"
     ))
 
-    # Thick Solid Lines for Mobile Visibility
     fig.add_vline(x=spot, line_width=3, line_color="white", annotation_text="SPOT")
     if gamma_flip:
         fig.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
     fig.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="C-WALL")
     fig.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="P-WALL")
 
-    fig.update_layout(
-        template="plotly_dark", 
-        height=600, 
-        xaxis_title="Strike",
-        margin=dict(l=10, r=10, t=30, b=10),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    
+    fig.update_layout(template="plotly_dark", height=600, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
-    st.caption(f"RF Rate (^IRX): {risk_free*100:.3f}% | Data delayed 15m")
+    
+    # --- FOOTER WITH YAHOO PRICE TIME ---
+    st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
     st.info("Please enter a ticker to load data.")
