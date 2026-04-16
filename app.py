@@ -65,14 +65,13 @@ try:
         st.error("No options found.")
         st.stop()
 
-    # Expiration for the TOP Chart
     selected_exp = st.selectbox("Select Top Chart Expiration", all_exps)
 
     # --- DATA PROCESSING ---
     risk_free = get_risk_free_rate()
     now_ts = datetime.now(timezone.utc).timestamp()
     
-    # 1. Process Main Chart Data (Single Expiry)
+    # 1. Main Chart Data
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
     
@@ -91,8 +90,8 @@ try:
 
     df_main = pd.DataFrame(main_strike_map.values()).sort_values("strike")
 
-    # 2. Process Heatmap Data (Next 10 Expirations)
-    with st.spinner("Generating Heatmap..."):
+    # 2. Heatmap Data (Next 10)
+    with st.spinner("Generating Term Structure Heatmap..."):
         heatmap_exps = all_exps[:10]
         heatmap_list = []
         for exp in heatmap_exps:
@@ -101,7 +100,6 @@ try:
             c = tk.option_chain(exp)
             for opt_type, df_h in [("call", c.calls), ("put", c.puts)]:
                 if df_h.empty: continue
-                # Filter to match visible strikes
                 df_h = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
                 for _, row in df_h.iterrows():
                     K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
@@ -113,12 +111,11 @@ try:
         df_heat_long = pd.DataFrame(heatmap_list)
         df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
 
-    # --- Filtering Logic ---
+    # Filtering
     if strike_option != "All":
         idx = (df_main['strike'] - spot).abs().idxmin()
         half = strike_option // 2
         df_main_view = df_main.iloc[max(0, idx-half): min(len(df_main), idx+half)]
-        # Filter pivot columns to match
         visible_strikes = df_main_view['strike'].unique()
         df_pivot = df_pivot.loc[:, df_pivot.columns.isin(visible_strikes)]
     else:
@@ -152,15 +149,25 @@ try:
     fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig_main, use_container_width=True)
 
-    # --- Heatmap (White Background) ---
+    # --- Heatmap with Custom White-Center Scale ---
     st.subheader("Gamma Term Structure (Next 10 Expirations)")
+    
+    # Custom colorscale: Red -> White (at 0) -> Green
+    custom_rdwgn = [
+        [0.0, "rgb(215,48,39)"],    # Strong Red
+        [0.45, "rgb(254,224,139)"], # Light Yellowish
+        [0.5, "rgb(255,255,255)"],  # Pure White at zero
+        [0.55, "rgb(166,217,106)"], # Light Green
+        [1.0, "rgb(26,152,80)"]     # Strong Green
+    ]
+
     fig_heat = go.Figure(data=go.Heatmap(
         z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index,
-        colorscale='RdYlGn', zmid=0, colorbar=dict(title="Net GEX")
+        colorscale=custom_rdwgn, zmid=0, colorbar=dict(title="Net GEX")
     ))
     fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
     fig_heat.update_layout(
-        template="plotly_white", # WHITE BACKGROUND
+        template="plotly_white",
         height=500,
         xaxis_title="Strike",
         yaxis_title="Expiration",
@@ -168,7 +175,8 @@ try:
     )
     st.plotly_chart(fig_heat, use_container_width=True)
 
-    st.caption(f"Delayed 15m | Time: {market_time}")
+    # Footer with Time Stamp AND Risk Free Rate Note
+    st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
-    st.info("Loading ticker data...")
+    st.info("Searching for ticker data... Please wait.")
