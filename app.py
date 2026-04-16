@@ -31,7 +31,7 @@ def get_risk_free_rate():
 
 # --- Sidebar Controls ---
 st.sidebar.header("⚙️ Total Market Settings")
-ticker_input = st.sidebar.text_input("Ticker", value="XSP").upper()
+ticker_input = st.sidebar.text_input("Ticker", value="^XSP").upper()
 strike_option = st.sidebar.selectbox("Display Range (Strikes)", options=[10, 20, 40, 60, "All"], index=2)
 
 try:
