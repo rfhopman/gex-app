@@ -111,7 +111,7 @@ try:
     net_total = df_plot["netGEX"].sum()
     call_wall = df_plot.loc[df_plot["netGEX"].idxmax(), "strike"]
     put_wall = df_plot.loc[df_plot["netGEX"].idxmin(), "strike"]
-    regime = "POS" if net_total >= 0 else "NEG"
+    regime = "Positive" if net_total >= 0 else "Negative"
     regime_color = "#4db6ac" if net_total >= 0 else "#e57373"
     
     # --- CONSOLIDATED METRICS HEADER ---
