@@ -38,7 +38,7 @@ ticker_input = st.sidebar.text_input("Ticker", value="SLV").upper()
 strike_option = st.sidebar.selectbox(
     "Number of Strikes", 
     options=[10, 20, 40, 60, "All"], 
-    index=2
+    index=3
 )
 
 try:
@@ -139,8 +139,8 @@ try:
     
     if gamma_flip:
         fig.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
-    fig.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="C-WALL")
-    fig.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="P-WALL")
+    fig.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="Call-Wall")
+    fig.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="Put-Wall")
 
     fig.update_layout(template="plotly_dark", height=600, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
