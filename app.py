@@ -36,7 +36,7 @@ st.title("📊 GEX DASHBOARD")
 ctrl_col1, ctrl_col2 = st.columns([1, 2])
 
 with ctrl_col1:
-    ticker_input = st.text_input("Ticker", value="^XSP").upper()
+    ticker_input = st.text_input("Ticker", value="XSP").upper()
 
 with ctrl_col2:
     strike_option = st.radio(
@@ -70,7 +70,7 @@ try:
     risk_free = get_risk_free_rate()
     now_ts = datetime.now(timezone.utc).timestamp()
     
-    # 1. Main Chart Data (Refined to keep Call/Put separated)
+    # 1. Main Chart Data
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
     
@@ -92,8 +92,16 @@ try:
             })
 
     df_main = pd.DataFrame(main_list)
-    # Aggregated version for Wall metrics
-    df_agg = df_main.groupby("strike")["gex"].sum().reset_index()
+    df_agg = df_main.groupby("strike")["gex"].sum().reset_index().sort_values("strike")
+
+    # --- Gamma Flip Calculation ---
+    gamma_flip = None
+    for i in range(len(df_agg)-1):
+        g1, g2 = df_agg.iloc[i]["gex"], df_agg.iloc[i+1]["gex"]
+        if g1 * g2 < 0:
+            s1, s2 = df_agg.iloc[i]["strike"], df_agg.iloc[i+1]["strike"]
+            gamma_flip = s1 - g1 * (s2 - s1) / (g2 - g1)
+            break
 
     # 2. Heatmap Data (Next 10)
     with st.spinner("Generating Term Structure Heatmap..."):
@@ -116,7 +124,7 @@ try:
         df_heat_long = pd.DataFrame(heatmap_list)
         df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
 
-    # Filtering for Strike Visibility
+    # Filtering
     if strike_option != "All":
         idx = (df_agg['strike'] - spot).abs().idxmin()
         half = strike_option // 2
@@ -136,64 +144,34 @@ try:
     st.write("---")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Spot", f"${spot:.2f}")
-    m2.metric("Expiry", selected_exp)
+    m2.metric("Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
     m3.metric("Net GEX", fmt_gex(net_total))
     m4.metric("Call-Wall", f"${call_wall:.2f}")
     m5.metric("Regime", regime) 
     m6.metric("Put-Wall", f"${put_wall:.2f}")
 
-    # --- Top Chart (Separated Call/Put Bars) ---
+    # --- Top Chart ---
     fig_main = go.Figure()
-    
-    # Calls (Positive)
     df_calls = df_main_view[df_main_view['type'] == 'Call']
-    fig_main.add_trace(go.Bar(
-        x=df_calls["strike"], y=df_calls["gex"],
-        marker_color="#4db6ac", name="Call Gamma"
-    ))
-    
-    # Puts (Negative)
+    fig_main.add_trace(go.Bar(x=df_calls["strike"], y=df_calls["gex"], marker_color="#4db6ac", name="Call Gamma"))
     df_puts = df_main_view[df_main_view['type'] == 'Put']
-    fig_main.add_trace(go.Bar(
-        x=df_puts["strike"], y=df_puts["gex"],
-        marker_color="#e57373", name="Put Gamma"
-    ))
+    fig_main.add_trace(go.Bar(x=df_puts["strike"], y=df_puts["gex"], marker_color="#e57373", name="Put Gamma"))
 
     fig_main.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
+    if gamma_flip:
+        fig_main.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
     fig_main.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="Call-Wall")
     fig_main.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="Put-Wall")
     
-    fig_main.update_layout(
-        template="plotly_dark", 
-        height=450, 
-        margin=dict(l=10, r=10, t=30, b=10),
-        barmode='relative' # Groups positive and negative bars at the same X
-    )
+    fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10), barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
 
-    # --- Heatmap with Custom White-Center Scale ---
+    # --- Heatmap ---
     st.subheader("Gamma Term Structure (Next 10 Expirations)")
-    
-    custom_rdwgn = [
-        [0.0, "rgb(215,48,39)"],    # Strong Red
-        [0.45, "rgb(254,224,139)"], # Light Yellowish
-        [0.5, "rgb(255,255,255)"],  # Pure White at zero
-        [0.55, "rgb(166,217,106)"], # Light Green
-        [1.0, "rgb(26,152,80)"]     # Strong Green
-    ]
-
-    fig_heat = go.Figure(data=go.Heatmap(
-        z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index,
-        colorscale=custom_rdwgn, zmid=0, colorbar=dict(title="Net GEX")
-    ))
+    custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
+    fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0, colorbar=dict(title="Net GEX")))
     fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
-    fig_heat.update_layout(
-        template="plotly_white",
-        height=500,
-        xaxis_title="Strike",
-        yaxis_title="Expiration",
-        margin=dict(l=10, r=10, t=10, b=10)
-    )
+    fig_heat.update_layout(template="plotly_white", height=500, xaxis_title="Strike", yaxis_title="Expiration", margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig_heat, use_container_width=True)
 
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
