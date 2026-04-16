@@ -38,7 +38,7 @@ ticker_input = st.sidebar.text_input("Ticker", value="SLV").upper()
 strike_option = st.sidebar.selectbox(
     "Number of Strikes", 
     options=[10, 20, 40, 60, "All"], 
-    index=3
+    index=2
 )
 
 try:
