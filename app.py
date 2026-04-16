@@ -32,7 +32,7 @@ def get_risk_free_rate():
 
 # --- Sidebar Controls ---
 st.sidebar.header("⚙️ App Settings")
-ticker_input = st.sidebar.text_input("Ticker", value="XSP").upper()
+ticker_input = st.sidebar.text_input("Ticker", value="SLV").upper()
 
 strike_option = st.sidebar.selectbox(
     "Number of Strikes", 
@@ -43,9 +43,14 @@ strike_option = st.sidebar.selectbox(
 try:
     tk = yf.Ticker(ticker_input)
     
-    # --- GET YAHOO MARKET TIME ---
-    # fast_info.last_price_timestamp gives UTC; convert to US/Eastern
-    raw_ts = tk.fast_info.get("last_price_timestamp")
+    # --- ROBUST YAHOO MARKET TIME FETCH ---
+    # Checking multiple possible sources for the timestamp
+    raw_ts = (
+        tk.fast_info.get("last_price_timestamp") or 
+        tk.fast_info.get("regular_market_time") or
+        (tk.history(period="1d").index[-1].timestamp() if not tk.history(period="1d").empty else None)
+    )
+    
     if raw_ts:
         market_time = datetime.fromtimestamp(raw_ts, tz=timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%I:%M:%S %p EST")
     else:
@@ -127,7 +132,9 @@ try:
         name="Net GEX"
     ))
 
-    fig.add_vline(x=spot, line_width=3, line_color="white", annotation_text="SPOT")
+    # --- UPDATED: SOLID BLACK SPOT LINE ---
+    fig.add_vline(x=spot, line_width=3, line_color="black", annotation_text="SPOT")
+    
     if gamma_flip:
         fig.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
     fig.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="C-WALL")
@@ -136,9 +143,8 @@ try:
     fig.update_layout(template="plotly_dark", height=600, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
     
-    # --- FOOTER WITH YAHOO PRICE TIME ---
+    # FOOTER
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
     st.info("Please enter a ticker to load data.")
- 
