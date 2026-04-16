@@ -51,7 +51,6 @@ try:
     if ticker_input == "XSP": search_ticker = "^XSP"
     tk = yf.Ticker(search_ticker)
     
-    # Precise Market Time Fetch
     try:
         raw_ts = tk.info.get('regularMarketTime') or tk.fast_info.get("last_price_timestamp")
         market_time = datetime.fromtimestamp(raw_ts, tz=timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%I:%M:%S %p %Z")
@@ -71,13 +70,14 @@ try:
     risk_free = get_risk_free_rate()
     now_ts = datetime.now(timezone.utc).timestamp()
     
-    # 1. Main Chart Data
+    # 1. Main Chart Data (Refined to keep Call/Put separated)
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
     
     chain = tk.option_chain(selected_exp)
-    main_strike_map = {}
-    for opt_type, df in [("call", chain.calls), ("put", chain.puts)]:
+    main_list = []
+    
+    for opt_type, df in [("Call", chain.calls), ("Put", chain.puts)]:
         if df.empty: continue
         df = df[(df['strike'] >= spot * 0.8) & (df['strike'] <= spot * 1.2)]
         for _, row in df.iterrows():
@@ -85,10 +85,15 @@ try:
             if OI <= 1 or iv <= 0: continue
             g = bs_gamma(spot, K, T_main, risk_free, iv)
             gex = g * OI * 100 * spot * spot * 0.01
-            if K not in main_strike_map: main_strike_map[K] = {"strike": K, "netGEX": 0.0}
-            main_strike_map[K]["netGEX"] += gex if opt_type == "call" else -gex
+            main_list.append({
+                "strike": K, 
+                "gex": gex if opt_type == "Call" else -gex,
+                "type": opt_type
+            })
 
-    df_main = pd.DataFrame(main_strike_map.values()).sort_values("strike")
+    df_main = pd.DataFrame(main_list)
+    # Aggregated version for Wall metrics
+    df_agg = df_main.groupby("strike")["gex"].sum().reset_index()
 
     # 2. Heatmap Data (Next 10)
     with st.spinner("Generating Term Structure Heatmap..."):
@@ -98,7 +103,7 @@ try:
             e_ts = datetime.strptime(exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
             T_heat = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
             c = tk.option_chain(exp)
-            for opt_type, df_h in [("call", c.calls), ("put", c.puts)]:
+            for opt_type, df_h in [("Call", c.calls), ("Put", c.puts)]:
                 if df_h.empty: continue
                 df_h = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
                 for _, row in df_h.iterrows():
@@ -106,25 +111,25 @@ try:
                     if OI <= 1 or iv <= 0: continue
                     g = bs_gamma(spot, K, T_heat, risk_free, iv)
                     gex = g * OI * 100 * spot * spot * 0.01
-                    heatmap_list.append({"expiry": exp, "strike": K, "netGEX": gex if opt_type == "call" else -gex})
+                    heatmap_list.append({"expiry": exp, "strike": K, "netGEX": gex if opt_type == "Call" else -gex})
         
         df_heat_long = pd.DataFrame(heatmap_list)
         df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
 
-    # Filtering
+    # Filtering for Strike Visibility
     if strike_option != "All":
-        idx = (df_main['strike'] - spot).abs().idxmin()
+        idx = (df_agg['strike'] - spot).abs().idxmin()
         half = strike_option // 2
-        df_main_view = df_main.iloc[max(0, idx-half): min(len(df_main), idx+half)]
-        visible_strikes = df_main_view['strike'].unique()
+        visible_strikes = df_agg.iloc[max(0, idx-half): min(len(df_agg), idx+half)]['strike'].unique()
+        df_main_view = df_main[df_main['strike'].isin(visible_strikes)]
         df_pivot = df_pivot.loc[:, df_pivot.columns.isin(visible_strikes)]
     else:
         df_main_view = df_main
 
     # Metrics
-    net_total = df_main["netGEX"].sum()
-    call_wall = df_main.loc[df_main["netGEX"].idxmax(), "strike"]
-    put_wall = df_main.loc[df_main["netGEX"].idxmin(), "strike"]
+    net_total = df_agg["gex"].sum()
+    call_wall = df_agg.loc[df_agg["gex"].idxmax(), "strike"]
+    put_wall = df_agg.loc[df_agg["gex"].idxmin(), "strike"]
     regime = "POS" if net_total >= 0 else "NEG"
 
     # --- UI Layout ---
@@ -137,22 +142,38 @@ try:
     m5.metric("Regime", regime) 
     m6.metric("Put-Wall", f"${put_wall:.2f}")
 
-    # --- Top Chart ---
+    # --- Top Chart (Separated Call/Put Bars) ---
     fig_main = go.Figure()
+    
+    # Calls (Positive)
+    df_calls = df_main_view[df_main_view['type'] == 'Call']
     fig_main.add_trace(go.Bar(
-        x=df_main_view["strike"], y=df_main_view["netGEX"],
-        marker_color=np.where(df_main_view["netGEX"] >= 0, "#4db6ac", "#e57373")
+        x=df_calls["strike"], y=df_calls["gex"],
+        marker_color="#4db6ac", name="Call Gamma"
     ))
+    
+    # Puts (Negative)
+    df_puts = df_main_view[df_main_view['type'] == 'Put']
+    fig_main.add_trace(go.Bar(
+        x=df_puts["strike"], y=df_puts["gex"],
+        marker_color="#e57373", name="Put Gamma"
+    ))
+
     fig_main.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
     fig_main.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="Call-Wall")
     fig_main.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="Put-Wall")
-    fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10))
+    
+    fig_main.update_layout(
+        template="plotly_dark", 
+        height=450, 
+        margin=dict(l=10, r=10, t=30, b=10),
+        barmode='relative' # Groups positive and negative bars at the same X
+    )
     st.plotly_chart(fig_main, use_container_width=True)
 
     # --- Heatmap with Custom White-Center Scale ---
     st.subheader("Gamma Term Structure (Next 10 Expirations)")
     
-    # Custom colorscale: Red -> White (at 0) -> Green
     custom_rdwgn = [
         [0.0, "rgb(215,48,39)"],    # Strong Red
         [0.45, "rgb(254,224,139)"], # Light Yellowish
@@ -175,8 +196,7 @@ try:
     )
     st.plotly_chart(fig_heat, use_container_width=True)
 
-    # Footer with Time Stamp AND Risk Free Rate Note
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
-    st.info("Searching for ticker data... Please wait.")
+    st.info("Gathering market data... (This can take 10-15 seconds for indices)")
