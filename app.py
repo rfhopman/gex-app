@@ -26,6 +26,7 @@ def fmt_gex(v):
 def get_risk_free_rate():
     try:
         irx = yf.Ticker("^IRX")
+        # Try fast_info then history
         rate = irx.fast_info.get("last_price") or irx.history(period="1d")["Close"].iloc[-1]
         return float(rate) / 100
     except: return 0.04
@@ -43,17 +44,18 @@ strike_option = st.sidebar.selectbox(
 try:
     tk = yf.Ticker(ticker_input)
     
-    # --- ROBUST YAHOO MARKET TIME FETCH ---
-    # Checking multiple possible sources for the timestamp
-    raw_ts = (
-        tk.fast_info.get("last_price_timestamp") or 
-        tk.fast_info.get("regular_market_time") or
-        (tk.history(period="1d").index[-1].timestamp() if not tk.history(period="1d").empty else None)
-    )
-    
-    if raw_ts:
-        market_time = datetime.fromtimestamp(raw_ts, tz=timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%I:%M:%S %p EST")
-    else:
+    # --- PRECISION MARKET TIME FETCH ---
+    # We pull from tk.info['regularMarketTime'] which is the standard Yahoo 'At Close' timestamp
+    try:
+        raw_ts = tk.info.get('regularMarketTime')
+        if raw_ts:
+            # Convert Unix timestamp to EST/EDT
+            market_time = datetime.fromtimestamp(raw_ts, tz=timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%I:%M:%S %p %Z")
+        else:
+            # Fallback to fast_info if info dict is throttled
+            raw_ts = tk.fast_info.get("last_price_timestamp")
+            market_time = datetime.fromtimestamp(raw_ts, tz=timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%I:%M:%S %p %Z")
+    except:
         market_time = "N/A"
 
     spot = tk.fast_info.get("last_price") or tk.history(period="1d")["Close"].iloc[-1]
@@ -132,7 +134,7 @@ try:
         name="Net GEX"
     ))
 
-    # --- UPDATED: SOLID BLACK SPOT LINE ---
+    # SPOT LINE: SOLID BLACK
     fig.add_vline(x=spot, line_width=3, line_color="black", annotation_text="SPOT")
     
     if gamma_flip:
