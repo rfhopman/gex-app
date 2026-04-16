@@ -36,7 +36,7 @@ st.title("📊 GEX DASHBOARD")
 ctrl_col1, ctrl_col2 = st.columns([1, 2])
 
 with ctrl_col1:
-    ticker_input = st.text_input("Ticker", value="XSP").upper()
+    ticker_input = st.text_input("Ticker", value="^XSP").upper()
 
 with ctrl_col2:
     strike_option = st.radio(
