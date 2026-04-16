@@ -2,12 +2,13 @@ import streamlit as st
 import math
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 # --- Setup Page Configuration ---
-st.set_page_config(page_title="GEX Dashboard", layout="wide")
+st.set_page_config(page_title="GEX Mobile", layout="wide")
 
 # --- Helpers ---
 def bs_gamma(S, K, T, r, iv):
@@ -30,13 +31,12 @@ def get_risk_free_rate():
     except: return 0.04
 
 # --- Sidebar Controls ---
-st.sidebar.title("⚡ GEX Controls")
+st.sidebar.header("⚙️ App Settings")
 ticker_input = st.sidebar.text_input("Ticker", value="^XSP").upper()
 strike_range = st.sidebar.slider("± Strikes from Spot", 5, 50, 20)
 
-# --- Data Fetching ---
-tk = yf.Ticker(ticker_input)
 try:
+    tk = yf.Ticker(ticker_input)
     # Fetch Spot
     spot = tk.fast_info.get("last_price") or tk.history(period="1d")["Close"].iloc[-1]
     
@@ -44,58 +44,81 @@ try:
     exps = tk.options
     selected_exp = st.sidebar.selectbox("Select Expiration", exps)
     
-    if st.sidebar.button("Compute GEX"):
-        # Calculate Risk Free & Time
-        risk_free = get_risk_free_rate()
-        now_ts = datetime.now(timezone.utc).timestamp()
-        exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
-        T = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
-        
-        # Get Option Chain
-        chain = tk.option_chain(selected_exp)
-        
-        # GEX Logic
-        strike_map = {}
-        for opt_type, df in [("call", chain.calls), ("put", chain.puts)]:
-            # Filter strikes near spot
-            df = df[(df['strike'] >= spot * 0.8) & (df['strike'] <= spot * 1.2)]
-            for _, row in df.iterrows():
-                K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
-                if OI <= 1 or iv <= 0: continue
-                
-                g = bs_gamma(spot, K, T, risk_free, iv)
-                gex = g * OI * 100 * spot * spot * 0.01
-                
-                if K not in strike_map: strike_map[K] = {"strike": K, "netGEX": 0.0}
-                strike_map[K]["netGEX"] += gex if opt_type == "call" else -gex
+    # Risk Free & Time Logic
+    risk_free = get_risk_free_rate()
+    now_ts = datetime.now(timezone.utc).timestamp()
+    exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
+    T = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
+    
+    # Get Option Chain
+    chain = tk.option_chain(selected_exp)
+    
+    # GEX Calculation Logic
+    strike_map = {}
+    for opt_type, df in [("call", chain.calls), ("put", chain.puts)]:
+        # Filter raw data to reasonable range to save memory
+        df = df[(df['strike'] >= spot * 0.7) & (df['strike'] <= spot * 1.3)]
+        for _, row in df.iterrows():
+            K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
+            if OI <= 1 or iv <= 0: continue
+            
+            g = bs_gamma(spot, K, T, risk_free, iv)
+            gex = g * OI * 100 * spot * spot * 0.01
+            
+            if K not in strike_map: strike_map[K] = {"strike": K, "netGEX": 0.0}
+            strike_map[K]["netGEX"] += gex if opt_type == "call" else -gex
 
-        strikes_df = pd.DataFrame(strike_map.values()).sort_values("strike")
-        # Filter by slider range
-        idx = (strikes_df['strike'] - spot).abs().idxmin()
-        strikes_df = strikes_df.iloc[max(0, idx-strike_range): min(len(strikes_df), idx+strike_range)]
+    df_plot = pd.DataFrame(strike_map.values()).sort_values("strike")
+    
+    # Center view on Spot based on sidebar slider
+    idx = (df_plot['strike'] - spot).abs().idxmin()
+    df_plot = df_plot.iloc[max(0, idx-strike_range): min(len(df_plot), idx+strike_range)]
 
-        # Metrics
-        net_total = strikes_df["netGEX"].sum()
-        call_wall = strikes_df.loc[strikes_df["netGEX"].idxmax(), "strike"]
-        put_wall = strikes_df.loc[strikes_df["netGEX"].idxmin(), "strike"]
-        
-        # --- UI Layout ---
-        st.header(f"{ticker_input} Dashboard")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Spot Price", f"${spot:.2f}")
-        col2.metric("Net GEX", fmt_gex(net_total))
-        col3.metric("Call Wall", f"${call_wall}")
-        col4.metric("Put Wall", f"${put_wall}")
+    # Metrics
+    net_total = df_plot["netGEX"].sum()
+    call_wall = df_plot.loc[df_plot["netGEX"].idxmax(), "strike"]
+    put_wall = df_plot.loc[df_plot["netGEX"].idxmin(), "strike"]
+    
+    # --- Display UI ---
+    st.title(f"📊 {ticker_input} GEX")
+    st.info(f"Expiry: {selected_exp} | RF Rate: {risk_free:.4f}")
+    
+    # KPI Metrics Row
+    m1, m2 = st.columns(2)
+    m1.metric("Spot Price", f"${spot:.2f}")
+    m2.metric("Net GEX", fmt_gex(net_total))
+    
+    m3, m4 = st.columns(2)
+    m3.metric("Call Wall", f"${call_wall}")
+    m4.metric("Put Wall", f"${put_wall}")
 
-        # --- Interactive Chart ---
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=strikes_df["strike"], y=strikes_df["netGEX"],
-            marker_color=np.where(strikes_df["netGEX"] >= 0, "#4db6ac", "#e57373")
-        ))
-        fig.add_vline(x=spot, line_dash="dash", line_color="yellow", annotation_text="Spot")
-        fig.update_layout(template="plotly_dark", height=600, title="Net GEX by Strike")
-        st.plotly_chart(fig, use_container_width=True)
+    # Interactive Plotly Chart
+    fig = go.Figure()
+    
+    # Add Gamma Bars
+    fig.add_trace(go.Bar(
+        x=df_plot["strike"], 
+        y=df_plot["netGEX"],
+        marker_color=np.where(df_plot["netGEX"] >= 0, "#4db6ac", "#e57373"),
+        name="Net GEX"
+    ))
+
+    # Add Level Lines
+    fig.add_vline(x=spot, line_dash="dash", line_color="yellow", annotation_text="SPOT")
+    fig.add_vline(x=call_wall, line_dash="dot", line_color="#4db6ac", annotation_text="C-WALL")
+    fig.add_vline(x=put_wall, line_dash="dot", line_color="#e57373", annotation_text="P-WALL")
+
+    fig.update_layout(
+        template="plotly_dark", 
+        height=600, 
+        xaxis_title="Strike", 
+        yaxis_title="Total Gamma Exposure",
+        margin=dict(l=10, r=10, t=10, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.warning("Enter a valid ticker in the sidebar to begin.")
+    st.error(f"Details: {e}")
