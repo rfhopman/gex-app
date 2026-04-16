@@ -30,21 +30,16 @@ def get_risk_free_rate():
         return float(rate) / 100
     except: return 0.04
 
-# --- TOP ROW CONTROLS (Replacing Sidebar) ---
+# --- TOP ROW CONTROLS ---
 st.title("📊 GEX DASHBOARD")
 
-# Create three columns at the top of the page
 ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 1])
 
 with ctrl_col1:
-    ticker_input = st.text_input("Ticker", value="^XSP").upper()
+    ticker_input = st.text_input("Ticker", value="XSP").upper()
 
 with ctrl_col2:
-    strike_option = st.selectbox(
-        "Strikes", 
-        options=[10, 20, 40, 60, "All"], 
-        index=2 
-    )
+    strike_option = st.selectbox("Strikes", options=[10, 20, 40, 60, "All"], index=2)
 
 try:
     search_ticker = ticker_input
@@ -93,10 +88,6 @@ try:
             if K not in strike_map: strike_map[K] = {"strike": K, "netGEX": 0.0}
             strike_map[K]["netGEX"] += gex if opt_type == "call" else -gex
 
-    if not strike_map:
-        st.warning("No valid data found.")
-        st.stop()
-
     df_plot = pd.DataFrame(strike_map.values()).sort_values("strike")
     
     # --- Gamma Flip ---
@@ -108,6 +99,7 @@ try:
             gamma_flip = s1 - g1 * (s2 - s1) / (g2 - g1)
             break
 
+    # View Filtering
     if strike_option != "All":
         idx = (df_plot['strike'] - spot).abs().idxmin()
         half = strike_option // 2
@@ -119,23 +111,19 @@ try:
     net_total = df_plot["netGEX"].sum()
     call_wall = df_plot.loc[df_plot["netGEX"].idxmax(), "strike"]
     put_wall = df_plot.loc[df_plot["netGEX"].idxmin(), "strike"]
-    regime = "POSITIVE (Dampening)" if net_total >= 0 else "NEGATIVE (Explosive)"
+    regime = "POS" if net_total >= 0 else "NEG"
     regime_color = "#4db6ac" if net_total >= 0 else "#e57373"
     
-    # --- Metrics Dashboard ---
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Spot Price", f"${spot:.2f}")
-    m1.metric("Gamma Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
-    m2.metric("Net GEX", fmt_gex(net_total))
-    m2.metric("Call-Wall", f"${call_wall:.2f}")
-    m3.metric("Put-Wall", f"${put_wall:.2f}")
-
-    st.markdown(
-        f"""<div style="background-color:#1e1e1e; padding:15px; border-radius:10px; border-left: 8px solid {regime_color}; margin-bottom:20px">
-            <span style="color:#888; font-size:12px; font-weight:bold; text-transform:uppercase">Regime</span><br>
-            <span style="color:{regime_color}; font-size:24px; font-weight:bold">{regime}</span>
-        </div>""", unsafe_allow_html=True
-    )
+    # --- CONSOLIDATED METRICS HEADER ---
+    st.write("---")
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("Spot", f"${spot:.2f}")
+    m2.metric("Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
+    m3.metric("Net GEX", fmt_gex(net_total))
+    m4.metric("Call-Wall", f"${call_wall:.2f}")
+    # Regime placed next to Call Wall
+    m5.metric("Regime", regime, delta=None, delta_color="normal") 
+    m6.metric("Put-Wall", f"${put_wall:.2f}")
 
     # --- Chart ---
     fig = go.Figure()
@@ -158,4 +146,4 @@ try:
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
-    st.info("Enter a ticker above to load data.")
+    st.info("Enter ticker data to begin.")
