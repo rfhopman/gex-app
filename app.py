@@ -30,16 +30,21 @@ def get_risk_free_rate():
         return float(rate) / 100
     except: return 0.04
 
-# --- Sidebar Controls ---
-st.sidebar.header("⚙️ App Settings")
-ticker_input = st.sidebar.text_input("Ticker", value="XSP").upper()
+# --- TOP ROW CONTROLS (Replacing Sidebar) ---
+st.title("📊 GEX DASHBOARD")
 
-# Default set to 40 (Index 2)
-strike_option = st.sidebar.selectbox(
-    "Number of Strikes", 
-    options=[10, 20, 40, 60, "All"], 
-    index=2 
-)
+# Create three columns at the top of the page
+ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 1])
+
+with ctrl_col1:
+    ticker_input = st.text_input("Ticker", value="^XSP").upper()
+
+with ctrl_col2:
+    strike_option = st.selectbox(
+        "Strikes", 
+        options=[10, 20, 40, 60, "All"], 
+        index=2 
+    )
 
 try:
     search_ticker = ticker_input
@@ -62,19 +67,20 @@ try:
             tk = yf.Ticker(ticker_input.replace("^", ""))
             exps = tk.options
     except:
-        st.error("Could not fetch option chain for this ticker.")
+        st.error("Could not fetch option chain.")
         st.stop()
 
-    selected_exp = st.sidebar.selectbox("Select Expiration", exps)
+    with ctrl_col3:
+        selected_exp = st.selectbox("Expiration", exps)
+
+    # --- DATA PROCESSING ---
     risk_free = get_risk_free_rate()
-    
     now_ts = datetime.now(timezone.utc).timestamp()
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
     
     chain = tk.option_chain(selected_exp)
     
-    # --- Calculate GEX ---
     strike_map = {}
     for opt_type, df in [("call", chain.calls), ("put", chain.puts)]:
         if df.empty: continue
@@ -88,12 +94,12 @@ try:
             strike_map[K]["netGEX"] += gex if opt_type == "call" else -gex
 
     if not strike_map:
-        st.warning("No valid data for this expiration.")
+        st.warning("No valid data found.")
         st.stop()
 
     df_plot = pd.DataFrame(strike_map.values()).sort_values("strike")
     
-    # --- Gamma Flip Level ---
+    # --- Gamma Flip ---
     gamma_flip = None
     for i in range(len(df_plot)-1):
         if df_plot.iloc[i]["netGEX"] * df_plot.iloc[i+1]["netGEX"] < 0:
@@ -102,7 +108,6 @@ try:
             gamma_flip = s1 - g1 * (s2 - s1) / (g2 - g1)
             break
 
-    # Filtering range
     if strike_option != "All":
         idx = (df_plot['strike'] - spot).abs().idxmin()
         half = strike_option // 2
@@ -117,17 +122,14 @@ try:
     regime = "POSITIVE (Dampening)" if net_total >= 0 else "NEGATIVE (Explosive)"
     regime_color = "#4db6ac" if net_total >= 0 else "#e57373"
     
-    # --- UI Layout: Reverted Header ---
-    st.title(f"📊 {ticker_input} GEX")
-    
-    c1, c2 = st.columns(2)
-    c1.metric("Spot Price", f"${spot:.2f}")
-    c1.metric("Gamma Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
-    c2.metric("Net GEX", fmt_gex(net_total))
-    c2.metric("Call-Wall", f"${call_wall:.2f}")
-    st.metric("Put-Wall", f"${put_wall:.2f}")
+    # --- Metrics Dashboard ---
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Spot Price", f"${spot:.2f}")
+    m1.metric("Gamma Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
+    m2.metric("Net GEX", fmt_gex(net_total))
+    m2.metric("Call-Wall", f"${call_wall:.2f}")
+    m3.metric("Put-Wall", f"${put_wall:.2f}")
 
-    # GEX Regime Indicator
     st.markdown(
         f"""<div style="background-color:#1e1e1e; padding:15px; border-radius:10px; border-left: 8px solid {regime_color}; margin-bottom:20px">
             <span style="color:#888; font-size:12px; font-weight:bold; text-transform:uppercase">Regime</span><br>
@@ -135,7 +137,7 @@ try:
         </div>""", unsafe_allow_html=True
     )
 
-    # --- Interactive Plotly Chart ---
+    # --- Chart ---
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=df_plot_view["strike"], 
@@ -144,25 +146,16 @@ try:
         name="Net GEX"
     ))
 
-    # SPOT LINE: SOLID BLACK (Enhanced Width)
     fig.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
-    
     if gamma_flip:
         fig.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
-    
-    # Walls as Solid Lines with updated naming
     fig.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="Call-Wall")
     fig.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="Put-Wall")
 
-    fig.update_layout(
-        template="plotly_dark", 
-        height=600, 
-        margin=dict(l=10, r=10, t=30, b=10),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
+    fig.update_layout(template="plotly_dark", height=600, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
     
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
-    st.info("Loading ticker data... Please ensure the ticker symbol is valid.")
+    st.info("Enter a ticker above to load data.")
