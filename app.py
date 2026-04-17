@@ -170,7 +170,13 @@ try:
     fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10), barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True, config=chart_config)
 
-    # --- Heat Map (Updated Hover Template) ---
+    # --- Heat Map Section ---
+    st.write("---")
+    st.subheader("Gamma Heat Map")
+    
+    # Heatmap-specific radio filter
+    heat_filter = st.radio("Heat Map Filter", options=["All", "Call", "Put"], index=0, horizontal=True)
+
     with st.spinner("Generating Gamma Heat Map..."):
         heatmap_exps = all_exps[:10]
         heatmap_list = []
@@ -180,6 +186,10 @@ try:
             try:
                 c = tk.option_chain(exp)
                 for opt_type, df_h_raw in [("Call", c.calls), ("Put", c.puts)]:
+                    # Skip if the user filtered for a specific type
+                    if heat_filter != "All" and opt_type != heat_filter:
+                        continue
+                        
                     df_h = df_h_raw.copy()
                     df_h["openInterest"] = pd.to_numeric(df_h["openInterest"], errors='coerce').fillna(0)
                     df_h["impliedVolatility"] = pd.to_numeric(df_h["impliedVolatility"], errors='coerce').fillna(0)
@@ -198,11 +208,9 @@ try:
         if heatmap_list:
             df_heat_long = pd.DataFrame(heatmap_list)
             df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
-            st.subheader("Gamma Heat Map")
             
             custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
             
-            # Hover formatting: %{x} is Strike, %{y} is Expiry, %{z} is GEX
             fig_heat = go.Figure(data=go.Heatmap(
                 z=df_pivot.values, 
                 x=df_pivot.columns, 
