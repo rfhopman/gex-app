@@ -16,17 +16,19 @@ st.set_page_config(page_title="GEX Dashboard Pro", page_icon="📊", layout="wid
 NTFY_TOPIC = "GEX_Alerts" 
 
 def send_iphone_notification(ticker, exp, spot, call_w, put_w):
-    msg = f"Spot: ${spot:.2f} | CW: ${call_w:.2f} | PW: ${put_w:.2f}"
-    title = f"🚨 {ticker} ({exp})"
+    # This places everything on one compact line for the iPhone lock screen
+    msg = f"🚨 {ticker} ({exp}): Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
+    
     try:
-        requests.post(
+        response = requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}", 
             data=msg.encode('utf-8'),
-            headers={"Title": title, "Priority": "high", "Tags": "chart_with_upwards_trend"},
-            timeout=5
+            timeout=10
         )
-    except: pass
-
+        return response.status_code
+    except Exception as e:
+        return str(e)
+        
 # --- AUTO-REFRESH LOGIC (2 PM - 4:15 PM EST) ---
 now_est = datetime.now(ZoneInfo("America/New_York"))
 start_time = time(14, 0)
