@@ -16,16 +16,29 @@ st.set_page_config(page_title="GEX Dashboard Pro", page_icon="📊", layout="wid
 NTFY_TOPIC = "GEX_Alerts" 
 
 def send_iphone_notification(ticker, exp, spot, call_w, put_w):
-    msg = f"Spot: ${spot:.2f} | CW: ${call_w:.2f} | PW: ${put_w:.2f}"
-    title = f"🚨 {ticker} ({exp})"
+    # This format mimics the simple 'body' send from the web test
+    msg = f"🚨 {ticker} ({exp})\nSpot: ${spot:.2f}\nCW: ${call_w:.2f} | PW: ${put_w:.2f}"
+    
     try:
-        requests.post(
+        # We send the message directly as 'data' with no extra headers first
+        response = requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}", 
             data=msg.encode('utf-8'),
-            headers={"Title": title, "Priority": "high", "Tags": "chart_with_upwards_trend"},
-            timeout=5
+            timeout=10
         )
-    except: pass
+        return response.status_code
+    except Exception as e:
+        return str(e)
+
+# --- SIDEBAR ---
+with st.sidebar:
+    st.write("### Notification Center")
+    if st.button("🔔 Send Test Notification"):
+        result = send_iphone_notification("TEST", "2026-04-17", 512.50, 520.00, 505.00)
+        if result == 200:
+            st.success("✅ Sent! If your phone is silent, check the ntfy app directly.")
+        else:
+            st.error(f"❌ Error: {result}")
 
 # --- AUTO-REFRESH LOGIC (2 PM - 4:15 PM EST) ---
 now_est = datetime.now(ZoneInfo("America/New_York"))
