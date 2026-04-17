@@ -51,12 +51,15 @@ def fmt_gex(v):
     return f"{s}${a:.0f}"
 
 @st.cache_data(ttl=300)
-def get_risk_free_rate():
+def get_market_data():
     try:
         irx = yf.Ticker("^IRX")
-        rate = irx.fast_info.get("last_price") or irx.history(period="1d")["Close"].iloc[-1]
-        return float(rate) / 100
-    except: return 0.04
+        vix = yf.Ticker("^VIX")
+        r_rate = (irx.fast_info.get("last_price") or irx.history(period="1d")["Close"].iloc[-1]) / 100
+        vix_val = vix.fast_info.get("last_price") or vix.history(period="1d")["Close"].iloc[-1]
+        return r_rate, vix_val
+    except: 
+        return 0.04, 0.0
 
 # --- TOP ROW CONTROLS ---
 st.title("📊 GEX DASHBOARD")
@@ -94,6 +97,10 @@ try:
     except: market_time = "N/A"
 
     spot = tk.fast_info.get("last_price") or tk.history(period="1d")["Close"].iloc[-1]
+    
+    # Fetch Market Data (RF and VIX)
+    risk_free, vix_price = get_market_data()
+    
     all_exps = tk.options
     if not all_exps:
         st.error("No options found.")
@@ -102,7 +109,6 @@ try:
     selected_exp = st.selectbox("Select Expiration Date", all_exps)
 
     # --- DATA PROCESSING ---
-    risk_free = get_risk_free_rate()
     now_ts = datetime.now(timezone.utc).timestamp()
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
@@ -158,12 +164,11 @@ try:
     st.write("---")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Spot", f"${spot:.2f}")
-    m2.metric("Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
-    m3.metric("Net GEX", fmt_gex(net_total))
-    m4.metric("Call-Wall", f"${call_wall:.2f}")
-    with m5:
-        st.markdown(f'<div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; text-align: center; border: 1px solid {text_color};"><p style="margin:0; font-size:12px; color: #555;">Regime</p><p style="margin:0; font-size:18px; font-weight:bold; color: {text_color};">{regime_val}</p></div>', unsafe_allow_html=True)
-    m6.metric("Put-Wall", f"${put_wall:.2f}")
+    m2.metric("Net GEX", fmt_gex(net_total))
+    m3.metric("Call-Wall", f"${call_wall:.2f}")
+    m4.metric("Put-Wall", f"${put_wall:.2f}")
+    m5.metric("VIX", f"{vix_price:.2f}")
+    m6.metric("RF Rate", f"{risk_free*100:.2f}%")
 
     # --- TOP CHART ---
     fig_main = go.Figure()
@@ -222,7 +227,7 @@ try:
     table_filter = st.radio("Filter Table", options=["All", "Call", "Put"], index=0, horizontal=True)
     df_to_show = df_table_full if table_filter == "All" else df_table_full[df_table_full["Type"] == table_filter]
     st.dataframe(df_to_show, use_container_width=True, hide_index=True)
-    st.caption(f"Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
+    st.caption(f"Market Time: {market_time} | VIX: {vix_price:.2f} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
     st.error(f"Error: {e}")
