@@ -33,7 +33,6 @@ def get_risk_free_rate():
 # --- TOP ROW CONTROLS ---
 st.title("📊 GEX DASHBOARD")
 
-# Layout for the new filter and download options
 ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([1, 1.5, 1, 0.5])
 
 with ctrl_col1:
@@ -48,8 +47,7 @@ with ctrl_col2:
     )
 
 with ctrl_col3:
-    # Filter to hide low liquidity strikes
-    min_oi = st.radio("Min Contracts", options=[1, 5], index=0, horizontal=True, help="Hide strikes with OI <= this value")
+    min_oi = st.radio("Min Contracts", options=[1, 5], index=0, horizontal=True)
 
 with ctrl_col4:
     st.write("") 
@@ -75,37 +73,48 @@ try:
         st.error("No options found.")
         st.stop()
 
-    selected_exp = st.selectbox("Select Top Chart Expiration", all_exps)
+    selected_exp = st.selectbox("Select Expiration Date", all_exps)
 
     # --- DATA PROCESSING ---
     risk_free = get_risk_free_rate()
     now_ts = datetime.now(timezone.utc).timestamp()
     
-    # 1. Main Chart Data
+    # 1. Main Chart Data & Table Data
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
     
     chain = tk.option_chain(selected_exp)
     main_list = []
+    table_rows = []
     
     for opt_type, df in [("Call", chain.calls), ("Put", chain.puts)]:
         if df.empty: continue
-        # FILTER: Hide data if strike series has <= min_oi contracts
-        df = df[df['openInterest'] > min_oi]
+        # Apply the user's contract filter
+        df_filtered = df[df['openInterest'] > min_oi]
         
-        df = df[(df['strike'] >= spot * 0.8) & (df['strike'] <= spot * 1.2)]
-        for _, row in df.iterrows():
+        for _, row in df_filtered.iterrows():
             K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
             if iv <= 0: continue
+            
             g = bs_gamma(spot, K, T_main, risk_free, iv)
             gex = g * OI * 100 * spot * spot * 0.01
-            main_list.append({
-                "strike": K, 
-                "gex": gex if opt_type == "Call" else -gex,
-                "type": opt_type
+            
+            # Data for Graphs
+            if spot * 0.8 <= K <= spot * 1.2:
+                main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "type": opt_type})
+            
+            # Data for Table
+            table_rows.append({
+                "Strike": K,
+                "Type": opt_type,
+                "OI": int(OI),
+                "IV": round(iv, 4),
+                "GEX": round(gex if opt_type == "Call" else -gex, 2)
             })
 
     df_main = pd.DataFrame(main_list)
+    df_table = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
+    
     if df_main.empty:
         st.warning(f"No strikes found with more than {min_oi} contracts.")
         st.stop()
@@ -131,10 +140,7 @@ try:
             try:
                 c = tk.option_chain(exp)
                 for opt_type, df_h in [("Call", c.calls), ("Put", c.puts)]:
-                    if df_h.empty: continue
-                    # Apply contract filter here too
                     df_h = df_h[df_h['openInterest'] > min_oi]
-                    
                     df_h = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
                     for _, row in df_h.iterrows():
                         K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
@@ -147,7 +153,7 @@ try:
         df_heat_long = pd.DataFrame(heatmap_list)
         df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
 
-    # Filtering for display
+    # Filter for Graph Display
     if strike_option != "All":
         idx = (df_agg['strike'] - spot).abs().idxmin()
         half = strike_option // 2
@@ -173,40 +179,37 @@ try:
     m5.metric("Regime", regime) 
     m6.metric("Put-Wall", f"${put_wall:.2f}")
 
-    # Plot Config for Desktop Downloads
+    # Desktop Capture Config
     chart_config = {
-        'toImageButtonOptions': {
-            'format': 'png', # or 'jpeg'
-            'filename': f'{ticker_input}_GEX_{datetime.now().strftime("%Y%m%d")}',
-            'height': 720,
-            'width': 1280,
-            'scale': 2 # Higher resolution
-        },
+        'toImageButtonOptions': {'format': 'png', 'scale': 2},
         'displaylogo': False,
         'modeBarButtonsToAdd': ['downloadImage']
     }
 
-    # --- Top Chart ---
+    # Top Chart
     fig_main = go.Figure()
     df_calls = df_main_view[df_main_view['type'] == 'Call']
     fig_main.add_trace(go.Bar(x=df_calls["strike"], y=df_calls["gex"], marker_color="#4db6ac", name="Call Gamma"))
     df_puts = df_main_view[df_main_view['type'] == 'Put']
     fig_main.add_trace(go.Bar(x=df_puts["strike"], y=df_puts["gex"], marker_color="#e57373", name="Put Gamma"))
-
     fig_main.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
     if gamma_flip:
         fig_main.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
-    
     fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10), barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True, config=chart_config)
 
-    # --- Heatmap ---
+    # Heatmap
     st.subheader("Gamma Term Structure (Next 10 Expirations)")
     custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
-    fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0, colorbar=dict(title="Net GEX")))
+    fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0))
     fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
-    fig_heat.update_layout(template="plotly_white", height=500, xaxis_title="Strike", yaxis_title="Expiration", margin=dict(l=10, r=10, t=10, b=10))
+    fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig_heat, use_container_width=True, config=chart_config)
+
+    # NEW: Data Table Section
+    st.write("---")
+    st.subheader(f"Raw Data: {ticker_input} - {selected_exp}")
+    st.dataframe(df_table, use_container_width=True, hide_index=True)
 
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
