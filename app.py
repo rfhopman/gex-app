@@ -138,7 +138,6 @@ try:
     call_wall = df_calc.loc[df_calc["gex"].idxmax(), "strike"] if not df_calc.empty else 0
     put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"] if not df_calc.empty else 0
     
-    # REGIME LOGIC
     regime_val = "POSITIVE" if net_total >= 0 else "NEGATIVE"
     bg_color = "#d4edda" if net_total >= 0 else "#f8d7da"
     text_color = "#155724" if net_total >= 0 else "#721c24"
@@ -151,16 +150,9 @@ try:
     m3.metric("Net GEX", fmt_gex(net_total))
     m4.metric("Call-Wall", f"${call_wall:.2f}")
     
-    # FIXED: Using unsafe_allow_html=True
     with m5:
         st.markdown(f"""
-            <div style="
-                background-color: {bg_color};
-                padding: 10px;
-                border-radius: 5px;
-                text-align: center;
-                border: 1px solid {text_color};
-            ">
+            <div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; text-align: center; border: 1px solid {text_color};">
                 <p style="margin:0; font-size:14px; color: #555;">Regime</p>
                 <p style="margin:0; font-size:20px; font-weight:bold; color: {text_color};">{regime_val}</p>
             </div>
@@ -170,7 +162,7 @@ try:
 
     chart_config = {'toImageButtonOptions': {'format': 'png', 'scale': 2}, 'displaylogo': False, 'modeBarButtonsToAdd': ['downloadImage']}
 
-    # Top Chart
+    # --- Top Chart (Updated Hover decimals) ---
     fig_main = go.Figure()
     if not df_main.empty:
         df_visual = df_main[df_main['oi'] >= min_oi_visual]
@@ -182,8 +174,22 @@ try:
         else:
             df_plot = df_visual
 
-        fig_main.add_trace(go.Bar(x=df_plot[df_plot['type'] == 'Call']["strike"], y=df_plot[df_plot['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call Gamma"))
-        fig_main.add_trace(go.Bar(x=df_plot[df_plot['type'] == 'Put']["strike"], y=df_plot[df_plot['type'] == 'Put']["gex"], marker_color="#e57373", name="Put Gamma"))
+        # Added hovertemplate for Call Gamma
+        fig_main.add_trace(go.Bar(
+            x=df_plot[df_plot['type'] == 'Call']["strike"], 
+            y=df_plot[df_plot['type'] == 'Call']["gex"], 
+            marker_color="#4db6ac", 
+            name="Call Gamma",
+            hovertemplate="Strike: %{x}<br>GEX: %{y:,.0f}<extra></extra>"
+        ))
+        # Added hovertemplate for Put Gamma
+        fig_main.add_trace(go.Bar(
+            x=df_plot[df_plot['type'] == 'Put']["strike"], 
+            y=df_plot[df_plot['type'] == 'Put']["gex"], 
+            marker_color="#e57373", 
+            name="Put Gamma",
+            hovertemplate="Strike: %{x}<br>GEX: %{y:,.0f}<extra></extra>"
+        ))
     
     fig_main.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
     if gamma_flip: fig_main.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
