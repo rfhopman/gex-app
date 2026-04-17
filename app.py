@@ -16,11 +16,10 @@ st.set_page_config(page_title="GEX Dashboard Pro", page_icon="📊", layout="wid
 NTFY_TOPIC = "GEX_Alerts" 
 
 def send_iphone_notification(ticker, exp, spot, call_w, put_w):
-    # This format mimics the simple 'body' send from the web test
-    msg = f"🚨 {ticker} ({exp})\nSpot: ${spot:.2f}\nCW: ${call_w:.2f} | PW: ${put_w:.2f}"
+    # This places everything on one compact line for the iPhone lock screen
+    msg = f"🚨 {ticker} ({exp}): Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
     
     try:
-        # We send the message directly as 'data' with no extra headers first
         response = requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}", 
             data=msg.encode('utf-8'),
