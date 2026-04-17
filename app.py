@@ -1,6 +1,3 @@
-# This sets the 📊 emoji as the browser tab icon automatically
-st.set_page_config(page_title="GEX Dashboard Pro", page_icon="📊", layout="wide")
-
 import streamlit as st
 import math
 import yfinance as yf
