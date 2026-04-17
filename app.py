@@ -126,17 +126,22 @@ try:
     df_calc = df_main.groupby("strike")["gex"].sum().reset_index().sort_values("strike")
     
     gamma_flip = None
-    for i in range(len(df_calc)-1):
-        g1, g2 = df_calc.iloc[i]["gex"], df_calc.iloc[i+1]["gex"]
-        if g1 * g2 < 0:
-            s1, s2 = df_calc.iloc[i]["strike"], df_calc.iloc[i+1]["strike"]
-            gamma_flip = s1 - g1 * (s2 - s1) / (g2 - g1)
-            break
+    if not df_calc.empty:
+        for i in range(len(df_calc)-1):
+            g1, g2 = df_calc.iloc[i]["gex"], df_calc.iloc[i+1]["gex"]
+            if g1 * g2 < 0:
+                s1, s2 = df_calc.iloc[i]["strike"], df_calc.iloc[i+1]["strike"]
+                gamma_flip = s1 - g1 * (s2 - s1) / (g2 - g1)
+                break
 
     net_total = df_calc["gex"].sum() if not df_calc.empty else 0
     call_wall = df_calc.loc[df_calc["gex"].idxmax(), "strike"] if not df_calc.empty else 0
     put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"] if not df_calc.empty else 0
-    regime = "POS" if net_total >= 0 else "NEG"
+    
+    # REGIME LOGIC
+    regime_val = "POSITIVE" if net_total >= 0 else "NEGATIVE"
+    bg_color = "#d4edda" if net_total >= 0 else "#f8d7da"
+    text_color = "#155724" if net_total >= 0 else "#721c24"
 
     # --- UI Layout ---
     st.write("---")
@@ -145,7 +150,22 @@ try:
     m2.metric("Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
     m3.metric("Net GEX", fmt_gex(net_total))
     m4.metric("Call-Wall", f"${call_wall:.2f}")
-    m5.metric("Regime", regime) 
+    
+    # CUSTOM COLORED BOX FOR REGIME
+    with m5:
+        st.markdown(f"""
+            <div style="
+                background-color: {bg_color};
+                padding: 10px;
+                border-radius: 5px;
+                text-align: center;
+                border: 1px solid {text_color};
+            ">
+                <p style="margin:0; font-size:14px; color: #555;">Regime</p>
+                <p style="margin:0; font-size:20px; font-weight:bold; color: {text_color};">{regime_val}</p>
+            </div>
+        """, unsafe_with_html=True)
+
     m6.metric("Put-Wall", f"${put_wall:.2f}")
 
     chart_config = {'toImageButtonOptions': {'format': 'png', 'scale': 2}, 'displaylogo': False, 'modeBarButtonsToAdd': ['downloadImage']}
@@ -173,8 +193,6 @@ try:
     # --- Heat Map Section ---
     st.write("---")
     st.subheader("Gamma Heat Map")
-    
-    # Heatmap-specific radio filter
     heat_filter = st.radio("Heat Map Filter", options=["All", "Call", "Put"], index=0, horizontal=True)
 
     with st.spinner("Generating Gamma Heat Map..."):
@@ -186,17 +204,13 @@ try:
             try:
                 c = tk.option_chain(exp)
                 for opt_type, df_h_raw in [("Call", c.calls), ("Put", c.puts)]:
-                    # Skip if the user filtered for a specific type
                     if heat_filter != "All" and opt_type != heat_filter:
                         continue
-                        
                     df_h = df_h_raw.copy()
                     df_h["openInterest"] = pd.to_numeric(df_h["openInterest"], errors='coerce').fillna(0)
                     df_h["impliedVolatility"] = pd.to_numeric(df_h["impliedVolatility"], errors='coerce').fillna(0)
-                    
                     df_h_plot = df_h[df_h['openInterest'] >= min_oi_visual]
                     df_h_plot = df_h_plot[(df_h_plot['strike'] >= spot * 0.9) & (df_h_plot['strike'] <= spot * 1.1)]
-                    
                     for _, row in df_h_plot.iterrows():
                         K_h, OI_h, iv_h = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"])
                         if iv_h <= 0: continue
@@ -208,18 +222,11 @@ try:
         if heatmap_list:
             df_heat_long = pd.DataFrame(heatmap_list)
             df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
-            
             custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
-            
             fig_heat = go.Figure(data=go.Heatmap(
-                z=df_pivot.values, 
-                x=df_pivot.columns, 
-                y=df_pivot.index, 
-                colorscale=custom_rdwgn, 
-                zmid=0,
+                z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0,
                 hovertemplate="<b>Expiry</b>: %{y}<br><b>Strike</b>: %{x}<br><b>Net GEX</b>: %{z:,.0f}<extra></extra>"
             ))
-            
             fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True, config=chart_config)
@@ -228,13 +235,10 @@ try:
     st.write("---")
     st.subheader(f"Raw Data: {ticker_input} - {selected_exp}")
     table_filter = st.radio("Filter Table By Type", options=["All", "Call", "Put"], index=0, horizontal=True)
-    
     if table_filter == "All": df_to_show = df_table_full
     else: df_to_show = df_table_full[df_table_full["Type"] == table_filter]
-        
     st.dataframe(df_to_show, use_container_width=True, hide_index=True)
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
-    st.error(f"Error encountered: {e}")
-    st.info("Check if the ticker symbol is correct or if market data is available.")
+    st.error(f"Error: {e}")
