@@ -199,4 +199,46 @@ try:
         heatmap_exps = all_exps[:10]
         heatmap_list = []
         for exp in heatmap_exps:
-            e_ts = datetime.strptime(exp, "%Y
+            e_ts = datetime.strptime(exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
+            T_heat = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
+            try:
+                c = tk.option_chain(exp)
+                for opt_type, df_h_raw in [("Call", c.calls), ("Put", c.puts)]:
+                    if heat_filter != "All" and opt_type != heat_filter:
+                        continue
+                    df_h = df_h_raw.copy()
+                    df_h["openInterest"] = pd.to_numeric(df_h["openInterest"], errors='coerce').fillna(0)
+                    df_h["impliedVolatility"] = pd.to_numeric(df_h["impliedVolatility"], errors='coerce').fillna(0)
+                    df_h_plot = df_h[df_h['openInterest'] >= min_oi_visual]
+                    df_h_plot = df_h_plot[(df_h_plot['strike'] >= spot * 0.9) & (df_h_plot['strike'] <= spot * 1.1)]
+                    for _, row in df_h_plot.iterrows():
+                        K_h, OI_h, iv_h = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"])
+                        if iv_h <= 0: continue
+                        g = bs_gamma(spot, K_h, T_heat, risk_free, iv_h)
+                        gex = g * OI_h * 100 * spot * spot * 0.01
+                        heatmap_list.append({"expiry": exp, "strike": K_h, "netGEX": gex if opt_type == "Call" else -gex})
+            except: continue
+        
+        if heatmap_list:
+            df_heat_long = pd.DataFrame(heatmap_list)
+            df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
+            custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
+            fig_heat = go.Figure(data=go.Heatmap(
+                z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0,
+                hovertemplate="<b>Expiry</b>: %{y}<br><b>Strike</b>: %{x}<br><b>Net GEX</b>: %{z:,.0f}<extra></extra>"
+            ))
+            fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
+            fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_heat, use_container_width=True, config=chart_config)
+
+    # Data Table
+    st.write("---")
+    st.subheader(f"Raw Data: {ticker_input} - {selected_exp}")
+    table_filter = st.radio("Filter Table By Type", options=["All", "Call", "Put"], index=0, horizontal=True)
+    if table_filter == "All": df_to_show = df_table_full
+    else: df_to_show = df_table_full[df_table_full["Type"] == table_filter]
+    st.dataframe(df_to_show, use_container_width=True, hide_index=True)
+    st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
+
+except Exception as e:
+    st.error(f"Error: {e}")
