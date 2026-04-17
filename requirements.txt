@@ -1,5 +1,6 @@
-streamlit
-pandas
 yfinance
-plotly
+pandas
 numpy
+plotly
+requests
+streamlit-autorefresh
