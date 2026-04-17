@@ -14,7 +14,7 @@ st.set_page_config(page_title="GEX Dashboard Pro", page_icon="📊", layout="wid
 
 # --- CUSTOM NOTIFICATION LOGIC ---
 # Change this to something unique so only YOU get the alerts
-NTFY_TOPIC = "my_gex_alerts_123" 
+NTFY_TOPIC = "GEX_alerts" 
 
 def send_iphone_notification(ticker, exp, spot, call_w, put_w):
     msg = f"Spot: ${spot:.2f} | CallWall: ${call_w:.2f} | PutWall: ${put_w:.2f}"
