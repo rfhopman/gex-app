@@ -47,7 +47,6 @@ with ctrl_col2:
     )
 
 with ctrl_col3:
-    # UPDATED: Label clarifies this is for visual density only
     min_oi_visual = st.radio("Min Contracts (Visual Only)", options=[1, 5], index=0, horizontal=True)
 
 with ctrl_col4:
@@ -92,25 +91,26 @@ try:
         
         for _, row in df.iterrows():
             K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
+            # FIXED: Handle NaN volume by providing a default value
             vol = row.get("volume", 0)
+            if pd.isna(vol): vol = 0
+            
             if iv <= 0: continue
             
             g = bs_gamma(spot, K, T_main, risk_free, iv)
             gex = g * OI * 100 * spot * spot * 0.01
             
-            # 1. GRAPH DATA (Tagged for visual filtering later)
             if spot * 0.8 <= K <= spot * 1.2:
                 main_list.append({
                     "strike": K, 
                     "gex": gex if opt_type == "Call" else -gex, 
                     "type": opt_type,
-                    "oi": OI # Keep OI here for visual filtering
+                    "oi": OI
                 })
             
-            # 2. TABLE DATA (Always unfiltered)
             table_rows.append({
                 "Strike": K, "Type": opt_type, "OI": int(OI),
-                "Volume": int(vol) if not np.isnan(vol) else 0,
+                "Volume": int(vol), # Now safe from NaN
                 "IV": f"{iv*100:.2f}%",
                 "GEX": int(round(gex if opt_type == "Call" else -gex, 0))
             })
@@ -118,7 +118,6 @@ try:
     df_main = pd.DataFrame(main_list)
     df_table_full = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
     
-    # CALCULATIONS: Always use 100% of data (OI > 0)
     df_calc = df_main.groupby("strike")["gex"].sum().reset_index().sort_values("strike")
     
     gamma_flip = None
@@ -146,13 +145,10 @@ try:
 
     chart_config = {'toImageButtonOptions': {'format': 'png', 'scale': 2}, 'displaylogo': False, 'modeBarButtonsToAdd': ['downloadImage']}
 
-    # --- TOP CHART (Visual Filtering Only) ---
+    # Top Chart
     fig_main = go.Figure()
     if not df_main.empty:
-        # Step A: Apply Visual Filter for OI
         df_visual = df_main[df_main['oi'] > min_oi_visual]
-        
-        # Step B: Apply Strike View filter
         if strike_option != "All":
             idx = (df_calc['strike'] - spot).abs().idxmin()
             half = strike_option // 2
@@ -169,7 +165,7 @@ try:
     fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10), barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True, config=chart_config)
 
-    # --- HEATMAP (Visual Filtering Only) ---
+    # Heat Map
     with st.spinner("Generating Gamma Heat Map..."):
         heatmap_exps = all_exps[:10]
         heatmap_list = []
@@ -179,7 +175,6 @@ try:
             try:
                 c = tk.option_chain(exp)
                 for opt_type, df_h in [("Call", c.calls), ("Put", c.puts)]:
-                    # VISUAL FILTER ONLY
                     df_h_plot = df_h[df_h['openInterest'] > min_oi_visual]
                     df_h_plot = df_h_plot[(df_h_plot['strike'] >= spot * 0.9) & (df_h_plot['strike'] <= spot * 1.1)]
                     for _, row in df_h_plot.iterrows():
@@ -200,7 +195,7 @@ try:
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True, config=chart_config)
 
-    # --- Data Table Section (ALWAYS UNFILTERED) ---
+    # Raw Data Table
     st.write("---")
     st.subheader(f"Raw Data: {ticker_input} - {selected_exp}")
     table_filter = st.radio("Filter Table By Type", options=["All", "Call", "Put"], index=0, horizontal=True)
