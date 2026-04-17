@@ -47,7 +47,8 @@ with ctrl_col2:
     )
 
 with ctrl_col3:
-    min_oi = st.radio("Min Contracts", options=[1, 5], index=0, horizontal=True)
+    # UPDATED: Label clarifies this is for visual density only
+    min_oi_visual = st.radio("Min Contracts (Visual Only)", options=[1, 5], index=0, horizontal=True)
 
 with ctrl_col4:
     st.write("") 
@@ -79,7 +80,6 @@ try:
     risk_free = get_risk_free_rate()
     now_ts = datetime.now(timezone.utc).timestamp()
     
-    # 1. Main Chart Data & Table Data
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
     
@@ -89,84 +89,49 @@ try:
     
     for opt_type, df in [("Call", chain.calls), ("Put", chain.puts)]:
         if df.empty: continue
-        df_filtered = df[df['openInterest'] > min_oi]
         
-        for _, row in df_filtered.iterrows():
+        for _, row in df.iterrows():
             K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
-            vol = row.get("volume", 0) # Fetch volume if available
+            vol = row.get("volume", 0)
             if iv <= 0: continue
             
             g = bs_gamma(spot, K, T_main, risk_free, iv)
             gex = g * OI * 100 * spot * spot * 0.01
             
+            # 1. GRAPH DATA (Tagged for visual filtering later)
             if spot * 0.8 <= K <= spot * 1.2:
-                main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "type": opt_type})
+                main_list.append({
+                    "strike": K, 
+                    "gex": gex if opt_type == "Call" else -gex, 
+                    "type": opt_type,
+                    "oi": OI # Keep OI here for visual filtering
+                })
             
-            # Formatting Data for Table
+            # 2. TABLE DATA (Always unfiltered)
             table_rows.append({
-                "Strike": K,
-                "Type": opt_type,
-                "OI": int(OI),
+                "Strike": K, "Type": opt_type, "OI": int(OI),
                 "Volume": int(vol) if not np.isnan(vol) else 0,
-                "IV": f"{iv*100:.2f}%", # Format IV as %
-                "GEX": int(round(gex if opt_type == "Call" else -gex, 0)) # No decimals
+                "IV": f"{iv*100:.2f}%",
+                "GEX": int(round(gex if opt_type == "Call" else -gex, 0))
             })
 
     df_main = pd.DataFrame(main_list)
     df_table_full = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
     
-    if df_main.empty:
-        st.warning(f"No strikes found with more than {min_oi} contracts.")
-        st.stop()
-        
-    df_agg = df_main.groupby("strike")["gex"].sum().reset_index().sort_values("strike")
-
-    # Gamma Flip
+    # CALCULATIONS: Always use 100% of data (OI > 0)
+    df_calc = df_main.groupby("strike")["gex"].sum().reset_index().sort_values("strike")
+    
     gamma_flip = None
-    for i in range(len(df_agg)-1):
-        g1, g2 = df_agg.iloc[i]["gex"], df_agg.iloc[i+1]["gex"]
+    for i in range(len(df_calc)-1):
+        g1, g2 = df_calc.iloc[i]["gex"], df_calc.iloc[i+1]["gex"]
         if g1 * g2 < 0:
-            s1, s2 = df_agg.iloc[i]["strike"], df_agg.iloc[i+1]["strike"]
+            s1, s2 = df_calc.iloc[i]["strike"], df_calc.iloc[i+1]["strike"]
             gamma_flip = s1 - g1 * (s2 - s1) / (g2 - g1)
             break
 
-    # 2. Heatmap Data
-    with st.spinner("Generating Gamma Heat Map..."):
-        heatmap_exps = all_exps[:10]
-        heatmap_list = []
-        for exp in heatmap_exps:
-            e_ts = datetime.strptime(exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
-            T_heat = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
-            try:
-                c = tk.option_chain(exp)
-                for opt_type, df_h in [("Call", c.calls), ("Put", c.puts)]:
-                    df_h = df_h[df_h['openInterest'] > min_oi]
-                    df_h = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
-                    for _, row in df_h.iterrows():
-                        K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
-                        if iv <= 0: continue
-                        g = bs_gamma(spot, K, T_heat, risk_free, iv)
-                        gex = g * OI * 100 * spot * spot * 0.01
-                        heatmap_list.append({"expiry": exp, "strike": K, "netGEX": gex if opt_type == "Call" else -gex})
-            except: continue
-        
-        df_heat_long = pd.DataFrame(heatmap_list)
-        df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
-
-    # Filter for Graph Display
-    if strike_option != "All":
-        idx = (df_agg['strike'] - spot).abs().idxmin()
-        half = strike_option // 2
-        visible_strikes = df_agg.iloc[max(0, idx-half): min(len(df_agg), idx+half)]['strike'].unique()
-        df_main_view = df_main[df_main['strike'].isin(visible_strikes)]
-        df_pivot = df_pivot.loc[:, df_pivot.columns.isin(visible_strikes)]
-    else:
-        df_main_view = df_main
-
-    # Metrics
-    net_total = df_agg["gex"].sum()
-    call_wall = df_agg.loc[df_agg["gex"].idxmax(), "strike"]
-    put_wall = df_agg.loc[df_agg["gex"].idxmin(), "strike"]
+    net_total = df_calc["gex"].sum()
+    call_wall = df_calc.loc[df_calc["gex"].idxmax(), "strike"]
+    put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"]
     regime = "POS" if net_total >= 0 else "NEG"
 
     # --- UI Layout ---
@@ -181,23 +146,61 @@ try:
 
     chart_config = {'toImageButtonOptions': {'format': 'png', 'scale': 2}, 'displaylogo': False, 'modeBarButtonsToAdd': ['downloadImage']}
 
-    # Charts
+    # --- TOP CHART (Visual Filtering Only) ---
     fig_main = go.Figure()
-    fig_main.add_trace(go.Bar(x=df_main_view[df_main_view['type'] == 'Call']["strike"], y=df_main_view[df_main_view['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call Gamma"))
-    fig_main.add_trace(go.Bar(x=df_main_view[df_main_view['type'] == 'Put']["strike"], y=df_main_view[df_main_view['type'] == 'Put']["gex"], marker_color="#e57373", name="Put Gamma"))
+    if not df_main.empty:
+        # Step A: Apply Visual Filter for OI
+        df_visual = df_main[df_main['oi'] > min_oi_visual]
+        
+        # Step B: Apply Strike View filter
+        if strike_option != "All":
+            idx = (df_calc['strike'] - spot).abs().idxmin()
+            half = strike_option // 2
+            visible_strikes = df_calc.iloc[max(0, idx-half): min(len(df_calc), idx+half)]['strike'].unique()
+            df_plot = df_visual[df_visual['strike'].isin(visible_strikes)]
+        else:
+            df_plot = df_visual
+
+        fig_main.add_trace(go.Bar(x=df_plot[df_plot['type'] == 'Call']["strike"], y=df_plot[df_plot['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call Gamma"))
+        fig_main.add_trace(go.Bar(x=df_plot[df_plot['type'] == 'Put']["strike"], y=df_plot[df_plot['type'] == 'Put']["gex"], marker_color="#e57373", name="Put Gamma"))
+    
     fig_main.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
     if gamma_flip: fig_main.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
     fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10), barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True, config=chart_config)
 
-    st.subheader("Gamma Heat Map")
-    custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
-    fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0))
-    fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
-    fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
-    st.plotly_chart(fig_heat, use_container_width=True, config=chart_config)
+    # --- HEATMAP (Visual Filtering Only) ---
+    with st.spinner("Generating Gamma Heat Map..."):
+        heatmap_exps = all_exps[:10]
+        heatmap_list = []
+        for exp in heatmap_exps:
+            e_ts = datetime.strptime(exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
+            T_heat = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
+            try:
+                c = tk.option_chain(exp)
+                for opt_type, df_h in [("Call", c.calls), ("Put", c.puts)]:
+                    # VISUAL FILTER ONLY
+                    df_h_plot = df_h[df_h['openInterest'] > min_oi_visual]
+                    df_h_plot = df_h_plot[(df_h_plot['strike'] >= spot * 0.9) & (df_h_plot['strike'] <= spot * 1.1)]
+                    for _, row in df_h_plot.iterrows():
+                        K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
+                        if iv <= 0: continue
+                        g = bs_gamma(spot, K, T_heat, risk_free, iv)
+                        gex = g * OI * 100 * spot * spot * 0.01
+                        heatmap_list.append({"expiry": exp, "strike": K, "netGEX": gex if opt_type == "Call" else -gex})
+            except: continue
+        
+        if heatmap_list:
+            df_heat_long = pd.DataFrame(heatmap_list)
+            df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
+            st.subheader("Gamma Heat Map")
+            custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
+            fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0))
+            fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
+            fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_heat, use_container_width=True, config=chart_config)
 
-    # --- Data Table Section ---
+    # --- Data Table Section (ALWAYS UNFILTERED) ---
     st.write("---")
     st.subheader(f"Raw Data: {ticker_input} - {selected_exp}")
     table_filter = st.radio("Filter Table By Type", options=["All", "Call", "Put"], index=0, horizontal=True)
@@ -206,8 +209,8 @@ try:
     else: df_to_show = df_table_full[df_table_full["Type"] == table_filter]
         
     st.dataframe(df_to_show, use_container_width=True, hide_index=True)
-
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
-    st.info("Gathering market data... (This can take 10-15 seconds for indices)")
+    st.error(f"Error: {e}")
+    st.info("Gathering market data...")
