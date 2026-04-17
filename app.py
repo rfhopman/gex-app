@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 # --- Setup Page Configuration ---
-st.set_page_config(page_title="GEX Dashboard Pro", layout="wide",
-                  page_icon="📊",)
+# FIXED: Added page_icon="📊"
+st.set_page_config(page_title="GEX Dashboard Pro", page_icon="📊", layout="wide")
 
 # --- Helpers ---
 def bs_gamma(S, K, T, r, iv):
@@ -111,7 +111,8 @@ try:
                     "strike": K, 
                     "gex": gex if opt_type == "Call" else -gex, 
                     "type": opt_type,
-                    "oi": OI
+                    "oi": OI,
+                    "vol": vol
                 })
             
             table_rows.append({
@@ -163,7 +164,7 @@ try:
 
     chart_config = {'toImageButtonOptions': {'format': 'png', 'scale': 2}, 'displaylogo': False, 'modeBarButtonsToAdd': ['downloadImage']}
 
-    # --- Top Chart (Updated Hover decimals) ---
+    # --- Top Chart with Volume Area ---
     fig_main = go.Figure()
     if not df_main.empty:
         df_visual = df_main[df_main['oi'] >= min_oi_visual]
@@ -175,26 +176,44 @@ try:
         else:
             df_plot = df_visual
 
-        # Added hovertemplate for Call Gamma
+        # Background Volume Area (Calls - Light Blue)
+        fig_main.add_trace(go.Scatter(
+            x=df_plot[df_plot['type'] == 'Call']["strike"], 
+            y=df_plot[df_plot['type'] == 'Call']["vol"], 
+            fill='tozeroy', mode='none', fillcolor='rgba(173, 216, 230, 0.25)', 
+            name="Call Volume", yaxis="y2", hoverinfo="skip"
+        ))
+        
+        # Background Volume Area (Puts - Light Red)
+        fig_main.add_trace(go.Scatter(
+            x=df_plot[df_plot['type'] == 'Put']["strike"], 
+            y=df_plot[df_plot['type'] == 'Put']["vol"], 
+            fill='tozeroy', mode='none', fillcolor='rgba(255, 182, 193, 0.25)', 
+            name="Put Volume", yaxis="y2", hoverinfo="skip"
+        ))
+
+        # Primary GEX Bars
         fig_main.add_trace(go.Bar(
             x=df_plot[df_plot['type'] == 'Call']["strike"], 
             y=df_plot[df_plot['type'] == 'Call']["gex"], 
-            marker_color="#4db6ac", 
-            name="Call Gamma",
+            marker_color="#4db6ac", name="Call GEX",
             hovertemplate="Strike: %{x}<br>GEX: %{y:,.0f}<extra></extra>"
         ))
-        # Added hovertemplate for Put Gamma
         fig_main.add_trace(go.Bar(
             x=df_plot[df_plot['type'] == 'Put']["strike"], 
             y=df_plot[df_plot['type'] == 'Put']["gex"], 
-            marker_color="#e57373", 
-            name="Put Gamma",
+            marker_color="#e57373", name="Put GEX",
             hovertemplate="Strike: %{x}<br>GEX: %{y:,.0f}<extra></extra>"
         ))
     
     fig_main.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
     if gamma_flip: fig_main.add_vline(x=gamma_flip, line_width=2, line_dash="dash", line_color="orange", annotation_text="FLIP")
-    fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10), barmode='relative')
+    
+    fig_main.update_layout(
+        template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10),
+        barmode='relative',
+        yaxis2=dict(title="Volume", overlaying="y", side="right", showgrid=False, rangemode="tozero")
+    )
     st.plotly_chart(fig_main, use_container_width=True, config=chart_config)
 
     # --- Heat Map Section ---
