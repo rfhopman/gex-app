@@ -45,7 +45,6 @@ def fmt_gex(v):
 
 @st.cache_data(ttl=300)
 def get_market_data():
-    # Fetching Risk Free Rate (^IRX) and VIX (^VIX)
     try:
         irx = yf.Ticker("^IRX")
         vix = yf.Ticker("^VIX")
@@ -75,22 +74,25 @@ with ctrl_col4:
 try:
     search_ticker = "^XSP" if ticker_input == "XSP" else ticker_input
     tk = yf.Ticker(search_ticker)
-    spot = tk.fast_info.get("last_price") or tk.history(period="1d")["Close"].iloc[-1]
     
-    # NEW: VIX and Risk Free Rate
+    try:
+        raw_ts = tk.info.get('regularMarketTime') or tk.fast_info.get("last_price_timestamp")
+        market_time = datetime.fromtimestamp(raw_ts, tz=timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%I:%M:%S %p %Z")
+    except: market_time = "N/A"
+
+    spot = tk.fast_info.get("last_price") or tk.history(period="1d")["Close"].iloc[-1]
     risk_free, vix_price = get_market_data()
     
     all_exps = tk.options
     selected_exp = st.selectbox("Select Expiration", all_exps)
 
-    # --- PROCESSING ---
+    # --- DATA PROCESSING ---
     now_ts = datetime.now(timezone.utc).timestamp()
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
     
     chain = tk.option_chain(selected_exp)
-    main_list = []
-    table_rows = []
+    main_list, table_rows = [], []
     
     for opt_type, df_raw in [("Call", chain.calls), ("Put", chain.puts)]:
         df = df_raw.copy()
@@ -102,6 +104,7 @@ try:
             if iv <= 0: continue
             g = bs_gamma(spot, K, T_main, risk_free, iv)
             gex = g * OI * 100 * spot * spot * 0.01
+            
             if spot * 0.8 <= K <= spot * 1.2:
                 main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "type": opt_type, "oi": OI, "vol": vol})
             table_rows.append({"Strike": K, "Type": opt_type, "OI": int(OI), "Volume": int(vol), "GEX": int(round(gex if opt_type == "Call" else -gex, 0))})
@@ -117,17 +120,17 @@ try:
             send_iphone_notification(ticker_input, selected_exp, spot, call_wall, put_wall)
             st.session_state.last_notif = pytime.time()
 
-    # --- UI ---
+    # --- UI DASHBOARD ---
     st.write("---")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Spot", f"${spot:.2f}")
     m2.metric("Net GEX", fmt_gex(df_calc["gex"].sum()))
     m3.metric("Call-Wall", f"${call_wall:.2f}")
     m4.metric("Put-Wall", f"${put_wall:.2f}")
-    m5.metric("VIX", f"{vix_price:.2f}") # NEW VIX DISPLAY
+    m5.metric("VIX", f"{vix_price:.2f}")
     m6.metric("RF Rate", f"{risk_free*100:.2f}%")
 
-    # --- CHARTS ---
+    # --- CHART 1: GEX BARS ---
     fig = go.Figure()
     df_v = df_main[df_main['oi'] >= min_oi_visual]
     fig.add_trace(go.Scatter(x=df_v[df_v['type']=='Call']["strike"], y=df_v[df_v['type']=='Call']["vol"], fill='tozeroy', fillcolor='rgba(173,216,230,0.2)', yaxis="y2", name="Call Vol"))
@@ -137,16 +140,44 @@ try:
     fig.update_layout(template="plotly_dark", height=450, yaxis2=dict(overlaying="y", side="right", showgrid=False))
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- AD BANNER PLACEHOLDER ---
+    # --- CHART 2: HEAT MAP ---
+    st.write("---")
+    st.subheader("Gamma Heat Map")
+    with st.spinner("Loading Heat Map..."):
+        heatmap_exps = all_exps[:10]
+        heatmap_list = []
+        for exp in heatmap_exps:
+            try:
+                e_ts = datetime.strptime(exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
+                T_h = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
+                c = tk.option_chain(exp)
+                for o_type, df_h_raw in [("Call", c.calls), ("Put", c.puts)]:
+                    df_h = df_h_raw.copy()
+                    df_h = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
+                    for _, row in df_h.iterrows():
+                        iv_h = float(row["impliedVolatility"])
+                        if iv_h <= 0: continue
+                        g = bs_gamma(spot, float(row["strike"]), T_h, risk_free, iv_h)
+                        gex = g * float(row["openInterest"]) * 100 * spot * spot * 0.01
+                        heatmap_list.append({"expiry": exp, "strike": float(row["strike"]), "netGEX": gex if o_type == "Call" else -gex})
+            except: continue
+        
+        if heatmap_list:
+            df_heat = pd.DataFrame(heatmap_list).groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
+            fig_h = go.Figure(data=go.Heatmap(z=df_heat.values, x=df_heat.columns, y=df_heat.index, colorscale='RdYlGn', zmid=0))
+            fig_h.update_layout(template="plotly_white", height=500)
+            st.plotly_chart(fig_h, use_container_width=True)
+
+    # --- DATA TABLE ---
+    st.write("---")
+    st.subheader("Raw Data Table")
+    df_table = pd.DataFrame(table_rows).sort_values("Strike")
+    st.dataframe(df_table, use_container_width=True, hide_index=True)
+    st.caption(f"Market Time: {market_time}")
+
+    # --- AD BANNER ---
     st.markdown("---")
-    st.markdown(
-        """
-        <div style="text-align: center; padding: 10px; background-color: #333; color: #888; border-radius: 5px;">
-            <small>ADVERTISEMENT SPACE</small><br>
-            </div>
-        """, 
-        unsafe_allow_html=True
-    )
+    st.markdown('<div style="text-align: center; padding: 20px; background-color: #222; border: 1px dashed #555; color: #888; border-radius: 10px;">ADVERTISING SPACE (BOTTOM BANNER)</div>', unsafe_allow_html=True)
 
 except Exception as e:
     st.error(f"Error: {e}")
