@@ -176,7 +176,7 @@ try:
     st.plotly_chart(fig_main, use_container_width=True)
 
     # --- Heatmap ---
-    st.subheader("Gamma Term Structure (Next 10 Expirations)")
+    st.subheader("Gamma Heat Map (Next 10 Expirations)")
     custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
     fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0, colorbar=dict(title="Net GEX")))
     fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
