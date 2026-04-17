@@ -51,12 +51,17 @@ def fmt_gex(v):
     return f"{s}${a:.0f}"
 
 @st.cache_data(ttl=300)
-def get_risk_free_rate():
+def get_market_metrics():
     try:
         irx = yf.Ticker("^IRX")
+        vix = yf.Ticker("^VIX")
+        # Fetch risk-free rate
         rate = irx.fast_info.get("last_price") or irx.history(period="1d")["Close"].iloc[-1]
-        return float(rate) / 100
-    except: return 0.04
+        # Fetch VIX
+        vix_val = vix.fast_info.get("last_price") or vix.history(period="1d")["Close"].iloc[-1]
+        return float(rate) / 100, float(vix_val)
+    except: 
+        return 0.04, 0.0
 
 # --- TOP ROW CONTROLS ---
 st.title("📊 GEX DASHBOARD")
@@ -100,7 +105,7 @@ try:
     selected_exp = st.selectbox("Select Expiration Date", all_exps)
 
     # --- DATA PROCESSING ---
-    risk_free = get_risk_free_rate()
+    risk_free, vix_price = get_market_metrics()
     now_ts = datetime.now(timezone.utc).timestamp()
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
@@ -218,7 +223,7 @@ try:
     table_filter = st.radio("Filter Table", options=["All", "Call", "Put"], index=0, horizontal=True)
     df_to_show = df_table_full if table_filter == "All" else df_table_full[df_table_full["Type"] == table_filter]
     st.dataframe(df_to_show, use_container_width=True, hide_index=True)
-    st.caption(f"Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
+    st.caption(f"Market Time: {market_time} | VIX: {vix_price:.2f} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
     st.error(f"Error: {e}")
