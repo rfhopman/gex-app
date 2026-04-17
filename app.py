@@ -86,16 +86,22 @@ try:
     main_list = []
     table_rows = []
     
-    for opt_type, df in [("Call", chain.calls), ("Put", chain.puts)]:
-        if df.empty: continue
+    for opt_type, df_raw in [("Call", chain.calls), ("Put", chain.puts)]:
+        if df_raw.empty: continue
         
+        # PROACTIVE CLEANING: Replace all NaNs in relevant columns with 0
+        df = df_raw.copy()
+        for col in ["strike", "openInterest", "volume", "impliedVolatility"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
         for _, row in df.iterrows():
-            K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
-            # FIXED: Handle NaN volume by providing a default value
-            vol = row.get("volume", 0)
-            if pd.isna(vol): vol = 0
+            K = float(row["strike"])
+            OI = float(row["openInterest"])
+            iv = float(row["impliedVolatility"])
+            vol = float(row["volume"])
             
-            if iv <= 0: continue
+            if iv <= 0 or K <= 0: continue
             
             g = bs_gamma(spot, K, T_main, risk_free, iv)
             gex = g * OI * 100 * spot * spot * 0.01
@@ -110,7 +116,7 @@ try:
             
             table_rows.append({
                 "Strike": K, "Type": opt_type, "OI": int(OI),
-                "Volume": int(vol), # Now safe from NaN
+                "Volume": int(vol),
                 "IV": f"{iv*100:.2f}%",
                 "GEX": int(round(gex if opt_type == "Call" else -gex, 0))
             })
@@ -128,9 +134,9 @@ try:
             gamma_flip = s1 - g1 * (s2 - s1) / (g2 - g1)
             break
 
-    net_total = df_calc["gex"].sum()
-    call_wall = df_calc.loc[df_calc["gex"].idxmax(), "strike"]
-    put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"]
+    net_total = df_calc["gex"].sum() if not df_calc.empty else 0
+    call_wall = df_calc.loc[df_calc["gex"].idxmax(), "strike"] if not df_calc.empty else 0
+    put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"] if not df_calc.empty else 0
     regime = "POS" if net_total >= 0 else "NEG"
 
     # --- UI Layout ---
@@ -148,7 +154,7 @@ try:
     # Top Chart
     fig_main = go.Figure()
     if not df_main.empty:
-        df_visual = df_main[df_main['oi'] > min_oi_visual]
+        df_visual = df_main[df_main['oi'] >= min_oi_visual]
         if strike_option != "All":
             idx = (df_calc['strike'] - spot).abs().idxmin()
             half = strike_option // 2
@@ -174,15 +180,20 @@ try:
             T_heat = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
             try:
                 c = tk.option_chain(exp)
-                for opt_type, df_h in [("Call", c.calls), ("Put", c.puts)]:
-                    df_h_plot = df_h[df_h['openInterest'] > min_oi_visual]
+                for opt_type, df_h_raw in [("Call", c.calls), ("Put", c.puts)]:
+                    df_h = df_h_raw.copy()
+                    df_h["openInterest"] = pd.to_numeric(df_h["openInterest"], errors='coerce').fillna(0)
+                    df_h["impliedVolatility"] = pd.to_numeric(df_h["impliedVolatility"], errors='coerce').fillna(0)
+                    
+                    df_h_plot = df_h[df_h['openInterest'] >= min_oi_visual]
                     df_h_plot = df_h_plot[(df_h_plot['strike'] >= spot * 0.9) & (df_h_plot['strike'] <= spot * 1.1)]
+                    
                     for _, row in df_h_plot.iterrows():
-                        K, OI, iv = row["strike"], row["openInterest"], row["impliedVolatility"]
-                        if iv <= 0: continue
-                        g = bs_gamma(spot, K, T_heat, risk_free, iv)
-                        gex = g * OI * 100 * spot * spot * 0.01
-                        heatmap_list.append({"expiry": exp, "strike": K, "netGEX": gex if opt_type == "Call" else -gex})
+                        K_h, OI_h, iv_h = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"])
+                        if iv_h <= 0: continue
+                        g = bs_gamma(spot, K_h, T_heat, risk_free, iv_h)
+                        gex = g * OI_h * 100 * spot * spot * 0.01
+                        heatmap_list.append({"expiry": exp, "strike": K_h, "netGEX": gex if opt_type == "Call" else -gex})
             except: continue
         
         if heatmap_list:
@@ -195,7 +206,7 @@ try:
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True, config=chart_config)
 
-    # Raw Data Table
+    # Data Table
     st.write("---")
     st.subheader(f"Raw Data: {ticker_input} - {selected_exp}")
     table_filter = st.radio("Filter Table By Type", options=["All", "Call", "Put"], index=0, horizontal=True)
@@ -207,5 +218,5 @@ try:
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
-    st.error(f"Error: {e}")
-    st.info("Gathering market data...")
+    st.error(f"Error encountered: {e}")
+    st.info("Check if the ticker symbol is correct or if market data is available.")
