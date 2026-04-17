@@ -89,7 +89,6 @@ try:
     
     for opt_type, df in [("Call", chain.calls), ("Put", chain.puts)]:
         if df.empty: continue
-        # Apply the user's contract filter
         df_filtered = df[df['openInterest'] > min_oi]
         
         for _, row in df_filtered.iterrows():
@@ -99,11 +98,9 @@ try:
             g = bs_gamma(spot, K, T_main, risk_free, iv)
             gex = g * OI * 100 * spot * spot * 0.01
             
-            # Data for Graphs
             if spot * 0.8 <= K <= spot * 1.2:
                 main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "type": opt_type})
             
-            # Data for Table
             table_rows.append({
                 "Strike": K,
                 "Type": opt_type,
@@ -113,7 +110,7 @@ try:
             })
 
     df_main = pd.DataFrame(main_list)
-    df_table = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
+    df_table_full = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
     
     if df_main.empty:
         st.warning(f"No strikes found with more than {min_oi} contracts.")
@@ -131,7 +128,7 @@ try:
             break
 
     # 2. Heatmap Data (Next 10)
-    with st.spinner("Generating Term Structure Heatmap..."):
+    with st.spinner("Generating Gamma Heat Map..."):
         heatmap_exps = all_exps[:10]
         heatmap_list = []
         for exp in heatmap_exps:
@@ -179,7 +176,6 @@ try:
     m5.metric("Regime", regime) 
     m6.metric("Put-Wall", f"${put_wall:.2f}")
 
-    # Desktop Capture Config
     chart_config = {
         'toImageButtonOptions': {'format': 'png', 'scale': 2},
         'displaylogo': False,
@@ -199,17 +195,26 @@ try:
     st.plotly_chart(fig_main, use_container_width=True, config=chart_config)
 
     # Heatmap
-    st.subheader("Gamma Term Structure (Next 10 Expirations)")
+    st.subheader("Gamma Heat Map")
     custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
     fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0))
     fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
     fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig_heat, use_container_width=True, config=chart_config)
 
-    # NEW: Data Table Section
+    # --- Data Table Section ---
     st.write("---")
     st.subheader(f"Raw Data: {ticker_input} - {selected_exp}")
-    st.dataframe(df_table, use_container_width=True, hide_index=True)
+    
+    # Table Filter Radio Buttons
+    table_filter = st.radio("Filter Table By Type", options=["All", "Call", "Put"], index=0, horizontal=True)
+    
+    if table_filter == "All":
+        df_to_show = df_table_full
+    else:
+        df_to_show = df_table_full[df_table_full["Type"] == table_filter]
+        
+    st.dataframe(df_to_show, use_container_width=True, hide_index=True)
 
     st.caption(f"Data delayed 15 min | Yahoo Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
