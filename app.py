@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 # --- Setup Page Configuration ---
-st.set_page_config(page_title="GEX Dashboard Pro", layout="wide")
+st.set_page_config(page_title="GEX Dashboard Pro", layout="wide",
+                  page_icon="🚀",)
 
 # --- Helpers ---
 def bs_gamma(S, K, T, r, iv):
