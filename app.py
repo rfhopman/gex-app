@@ -16,17 +16,16 @@ st.set_page_config(page_title="GEX Dashboard Pro", page_icon="📊", layout="wid
 NTFY_TOPIC = "GEX_Alerts" 
 
 def send_iphone_notification(ticker, exp, spot, call_w, put_w):
-    # Compact one-line format for iPhone lock screen
-    msg = f"🚨 {ticker} ({exp}): Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
+    msg = f"Spot: ${spot:.2f} | CW: ${call_w:.2f} | PW: ${put_w:.2f}"
+    title = f"🚨 {ticker} ({exp})"
     try:
-        response = requests.post(
+        requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}", 
             data=msg.encode('utf-8'),
-            timeout=10
+            headers={"Title": title, "Priority": "high", "Tags": "chart_with_upwards_trend"},
+            timeout=5
         )
-        return response.status_code
-    except:
-        return "Error"
+    except: pass
 
 # --- AUTO-REFRESH LOGIC (2 PM - 4:15 PM EST) ---
 now_est = datetime.now(ZoneInfo("America/New_York"))
@@ -35,7 +34,6 @@ end_time = time(16, 15)
 
 if start_time <= now_est.time() <= end_time:
     from streamlit_autorefresh import st_autorefresh
-    # Refresh every 15 minutes (900,000 milliseconds)
     st_autorefresh(interval=15 * 60 * 1000, key="market_close_refresh")
 
 # --- Helpers ---
@@ -51,15 +49,12 @@ def fmt_gex(v):
     return f"{s}${a:.0f}"
 
 @st.cache_data(ttl=300)
-def get_market_data():
+def get_risk_free_rate():
     try:
         irx = yf.Ticker("^IRX")
-        vix = yf.Ticker("^VIX")
-        r_rate = (irx.fast_info.get("last_price") or irx.history(period="1d")["Close"].iloc[-1]) / 100
-        vix_val = vix.fast_info.get("last_price") or vix.history(period="1d")["Close"].iloc[-1]
-        return r_rate, vix_val
-    except: 
-        return 0.04, 0.0
+        rate = irx.fast_info.get("last_price") or irx.history(period="1d")["Close"].iloc[-1]
+        return float(rate) / 100
+    except: return 0.04
 
 # --- TOP ROW CONTROLS ---
 st.title("📊 GEX DASHBOARD")
@@ -67,10 +62,8 @@ st.title("📊 GEX DASHBOARD")
 with st.sidebar:
     st.write("### Notification Center")
     st.info(f"Topic: {NTFY_TOPIC}")
-    if st.button("🔔 Send Test Notification"):
-        res = send_iphone_notification("TEST", "2026-04-17", 0.00, 0.00, 0.00)
-        if res == 200: st.success("Sent successfully!")
-        else: st.error("Failed to send.")
+    if st.button("🔔 Test Notification"):
+        send_iphone_notification("TEST", "2026-04-17", 0.00, 0.00, 0.00)
 
 ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([1, 1.5, 1, 0.5])
 
@@ -97,10 +90,6 @@ try:
     except: market_time = "N/A"
 
     spot = tk.fast_info.get("last_price") or tk.history(period="1d")["Close"].iloc[-1]
-    
-    # Fetch Market Data (RF and VIX)
-    risk_free, vix_price = get_market_data()
-    
     all_exps = tk.options
     if not all_exps:
         st.error("No options found.")
@@ -109,6 +98,7 @@ try:
     selected_exp = st.selectbox("Select Expiration Date", all_exps)
 
     # --- DATA PROCESSING ---
+    risk_free = get_risk_free_rate()
     now_ts = datetime.now(timezone.utc).timestamp()
     exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
@@ -164,20 +154,19 @@ try:
     st.write("---")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Spot", f"${spot:.2f}")
-    m2.metric("Net GEX", fmt_gex(net_total))
-    m3.metric("Call-Wall", f"${call_wall:.2f}")
-    m4.metric("Put-Wall", f"${put_wall:.2f}")
-    m5.metric("VIX", f"{vix_price:.2f}")
-    m6.metric("RF Rate", f"{risk_free*100:.2f}%")
+    m2.metric("Flip", f"${gamma_flip:.2f}" if gamma_flip else "N/A")
+    m3.metric("Net GEX", fmt_gex(net_total))
+    m4.metric("Call-Wall", f"${call_wall:.2f}")
+    with m5:
+        st.markdown(f'<div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; text-align: center; border: 1px solid {text_color};"><p style="margin:0; font-size:12px; color: #555;">Regime</p><p style="margin:0; font-size:18px; font-weight:bold; color: {text_color};">{regime_val}</p></div>', unsafe_allow_html=True)
+    m6.metric("Put-Wall", f"${put_wall:.2f}")
 
     # --- TOP CHART ---
     fig_main = go.Figure()
     df_visual = df_main[df_main['oi'] >= min_oi_visual]
     
-    # Volume Area behind GEX
     fig_main.add_trace(go.Scatter(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["vol"], fill='tozeroy', mode='none', fillcolor='rgba(173, 216, 230, 0.2)', name="Call Vol", yaxis="y2", hoverinfo="skip"))
     fig_main.add_trace(go.Scatter(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["vol"], fill='tozeroy', mode='none', fillcolor='rgba(255, 182, 193, 0.2)', name="Put Vol", yaxis="y2", hoverinfo="skip"))
-    # GEX Bars
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX", hovertemplate="Strike: %{x}<br>GEX: %{y:,.0f}<extra></extra>"))
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX", hovertemplate="Strike: %{x}<br>GEX: %{y:,.0f}<extra></extra>"))
     
@@ -185,7 +174,7 @@ try:
     fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10), barmode='relative', yaxis2=dict(overlaying="y", side="right", showgrid=False))
     st.plotly_chart(fig_main, use_container_width=True)
 
-    # --- HEAT MAP SECTION ---
+    # --- HEAT MAP SECTION (RESTORED) ---
     st.write("---")
     st.subheader("Gamma Heat Map")
     heat_filter = st.radio("Heat Map Filter", options=["All", "Call", "Put"], index=0, horizontal=True)
@@ -221,13 +210,13 @@ try:
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True)
 
-    # --- DATA TABLE ---
+    # --- DATA TABLE (RESTORED) ---
     st.write("---")
     st.subheader(f"Raw Data: {ticker_input}")
     table_filter = st.radio("Filter Table", options=["All", "Call", "Put"], index=0, horizontal=True)
     df_to_show = df_table_full if table_filter == "All" else df_table_full[df_table_full["Type"] == table_filter]
     st.dataframe(df_to_show, use_container_width=True, hide_index=True)
-    st.caption(f"Market Time: {market_time} | VIX: {vix_price:.2f} | RF Rate: {risk_free*100:.3f}%")
+    st.caption(f"Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
     st.error(f"Error: {e}")
