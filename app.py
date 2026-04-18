@@ -29,12 +29,14 @@ def send_iphone_notification(ticker, exp, spot, call_w, put_w):
     except Exception as e:
         return str(e)
 
-# --- AUTO-REFRESH LOGIC (2 PM - 4:15 PM EST) ---
+# --- AUTO-REFRESH & WEEKDAY LOGIC (Mon-Fri, 2 PM - 4:15 PM EST) ---
 now_est = datetime.now(ZoneInfo("America/New_York"))
+is_weekday = now_est.weekday() <= 4  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
 start_time = time(14, 0)
 end_time = time(16, 15)
 
-if start_time <= now_est.time() <= end_time:
+# Only auto-refresh if it's a weekday during market hours
+if is_weekday and (start_time <= now_est.time() <= end_time):
     from streamlit_autorefresh import st_autorefresh
     st_autorefresh(interval=15 * 60 * 1000, key="market_close_refresh")
 
@@ -55,9 +57,7 @@ def get_market_metrics():
     try:
         irx = yf.Ticker("^IRX")
         vix = yf.Ticker("^VIX")
-        # Fetch risk-free rate
         rate = irx.fast_info.get("last_price") or irx.history(period="1d")["Close"].iloc[-1]
-        # Fetch VIX
         vix_val = vix.fast_info.get("last_price") or vix.history(period="1d")["Close"].iloc[-1]
         return float(rate) / 100, float(vix_val)
     except: 
@@ -111,8 +111,7 @@ try:
     T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
     
     chain = tk.option_chain(selected_exp)
-    main_list = []
-    table_rows = []
+    main_list, table_rows = [], []
     
     for opt_type, df_raw in [("Call", chain.calls), ("Put", chain.puts)]:
         df = df_raw.copy()
@@ -147,8 +146,8 @@ try:
     call_wall = df_calc.loc[df_calc["gex"].idxmax(), "strike"] if not df_calc.empty else 0
     put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"] if not df_calc.empty else 0
     
-    # --- AUTO-NOTIFICATION TRIGGER ---
-    if start_time <= now_est.time() <= end_time:
+    # --- AUTO-NOTIFICATION TRIGGER (Updated with Weekday Check) ---
+    if is_weekday and (start_time <= now_est.time() <= end_time):
         if "last_notif" not in st.session_state or (pytime.time() - st.session_state.last_notif) > 800:
             send_iphone_notification(ticker_input, selected_exp, spot, call_wall, put_wall)
             st.session_state.last_notif = pytime.time()
@@ -171,17 +170,15 @@ try:
     # --- TOP CHART ---
     fig_main = go.Figure()
     df_visual = df_main[df_main['oi'] >= min_oi_visual]
-    
     fig_main.add_trace(go.Scatter(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["vol"], fill='tozeroy', mode='none', fillcolor='rgba(173, 216, 230, 0.2)', name="Call Vol", yaxis="y2", hoverinfo="skip"))
     fig_main.add_trace(go.Scatter(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["vol"], fill='tozeroy', mode='none', fillcolor='rgba(255, 182, 193, 0.2)', name="Put Vol", yaxis="y2", hoverinfo="skip"))
-    fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX", hovertemplate="Strike: %{x}<br>GEX: %{y:,.0f}<extra></extra>"))
-    fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX", hovertemplate="Strike: %{x}<br>GEX: %{y:,.0f}<extra></extra>"))
-    
+    fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX"))
+    fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX"))
     fig_main.add_vline(x=spot, line_width=3, line_color="black", annotation_text="SPOT")
     fig_main.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10), barmode='relative', yaxis2=dict(overlaying="y", side="right", showgrid=False))
     st.plotly_chart(fig_main, use_container_width=True)
 
-    # --- HEAT MAP SECTION (RESTORED) ---
+    # --- HEAT MAP SECTION ---
     st.write("---")
     st.subheader("Gamma Heat Map")
     heat_filter = st.radio("Heat Map Filter", options=["All", "Call", "Put"], index=0, horizontal=True)
@@ -197,8 +194,6 @@ try:
                 for o_type, df_h_raw in [("Call", c.calls), ("Put", c.puts)]:
                     if heat_filter != "All" and o_type != heat_filter: continue
                     df_h = df_h_raw.copy()
-                    df_h["openInterest"] = pd.to_numeric(df_h["openInterest"], errors='coerce').fillna(0)
-                    df_h["impliedVolatility"] = pd.to_numeric(df_h["impliedVolatility"], errors='coerce').fillna(0)
                     df_h_plot = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
                     for _, row in df_h_plot.iterrows():
                         K_h, OI_h, iv_h = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"])
@@ -212,12 +207,12 @@ try:
             df_heat_long = pd.DataFrame(heatmap_list)
             df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
             custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
-            fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0, hovertemplate="<b>Exp</b>: %{y}<br><b>Strike</b>: %{x}<br><b>GEX</b>: %{z:,.0f}<extra></extra>"))
+            fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0))
             fig_heat.add_vline(x=spot, line_width=4, line_color="black")
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True)
 
-    # --- DATA TABLE (RESTORED) ---
+    # --- DATA TABLE ---
     st.write("---")
     st.subheader(f"Raw Data: {ticker_input}")
     table_filter = st.radio("Filter Table", options=["All", "Call", "Put"], index=0, horizontal=True)
