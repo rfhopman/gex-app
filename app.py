@@ -182,15 +182,15 @@ try:
     fig_vex = go.Figure()
     fig_vex.add_trace(go.Scatter(x=df_calc["strike"], y=df_calc["vex"], fill='tozeroy', line_color='#bb86fc', name="Net VEX"))
     
-    # Markers for Spot, Call Wall, and Put Wall
+    # Markers for Spot, Call Wall, and Put Wall (Solid Lines)
     fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
-    fig_vex.add_vline(x=call_wall, line_width=1, line_dash="dash", line_color="#4db6ac", annotation_text="CW")
-    fig_vex.add_vline(x=put_wall, line_width=1, line_dash="dash", line_color="#e57373", annotation_text="PW")
+    fig_vex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
+    fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     
     fig_vex.update_layout(title="Volatility Exposure (VEX) per Strike", template="plotly_dark", height=400)
     st.plotly_chart(fig_vex, use_container_width=True)
     
-    # VEX Summary moved below the chart
+    # VEX Summary Summary metrics
     vsum_col1, vsum_col2, vsum_col3 = st.columns(3)
     with vsum_col1:
         st.metric("Total Portfolio VEX", fmt_val(net_vex))
