@@ -39,12 +39,11 @@ if is_weekday and (start_time <= now_est.time() <= end_time):
 
 # --- Helpers ---
 def bs_greeks(S, K, T, r, iv):
-    """Returns (Gamma, Vega)"""
     if T <= 0 or iv <= 0 or S <= 0 or K <= 0: return 0.0, 0.0
     d1 = (math.log(S/K) + (r + 0.5*iv*iv)*T) / (iv*math.sqrt(T))
     pdf = (1.0 / math.sqrt(2*math.pi)) * math.exp(-0.5*d1*d1)
     gamma = pdf / (S * iv * math.sqrt(T))
-    vega = S * pdf * math.sqrt(T) * 0.01 # Sensitivity to 1% change in IV
+    vega = S * pdf * math.sqrt(T) * 0.01 
     return gamma, vega
 
 def fmt_val(v):
@@ -124,7 +123,7 @@ try:
             
             gamma, vega = bs_greeks(spot, K, T_main, risk_free, iv)
             gex = gamma * OI * 100 * spot * spot * 0.01
-            vex = vega * OI * 100  # VEX = Total Vega exposure at this strike
+            vex = vega * OI * 100 
             
             if spot * 0.8 <= K <= spot * 1.2:
                 main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "vex": vex, "type": opt_type, "oi": OI, "vol": vol})
@@ -175,28 +174,34 @@ try:
     st.subheader(f"Raw GEX Data: {ticker_input}")
     st.dataframe(df_table_full.drop(columns=['VEX']), use_container_width=True, hide_index=True)
 
-    # --- VEX DASHBOARD & DATA (NEW) ---
+    # --- VEX SECTION ---
     st.write("---")
-    st.header("📉 VEX DASHBOARD (Volatility Exposure)")
+    st.header("📉 VEX PROFILE (Volatility Exposure)")
     
-    vcol1, vcol2 = st.columns([2, 1])
+    # VEX Profile Chart
+    fig_vex = go.Figure()
+    fig_vex.add_trace(go.Scatter(x=df_calc["strike"], y=df_calc["vex"], fill='tozeroy', line_color='#bb86fc', name="Net VEX"))
     
-    with vcol1:
-        fig_vex = go.Figure()
-        fig_vex.add_trace(go.Scatter(x=df_calc["strike"], y=df_calc["vex"], fill='tozeroy', line_color='#bb86fc', name="Net VEX"))
-        fig_vex.add_vline(x=spot, line_width=2, line_dash="dash", line_color="white")
-        fig_vex.update_layout(title="Volatility Exposure (VEX) Profile", template="plotly_dark", height=350)
-        st.plotly_chart(fig_vex, use_container_width=True)
-        
-    with vcol2:
-        st.write("### VEX Summary")
-        st.info(f"**Total Portfolio VEX:** {fmt_val(net_vex)}")
-        st.write("This value represents the dollar impact on the dealer/market hedge for every **1% move in Volatility**.")
-        st.write(f"- **VIX:** {vix_price:.2f}")
-        st.write(f"- **Treasury Yield:** {risk_free*100:.3f}%")
+    # Markers for Spot, Call Wall, and Put Wall
+    fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
+    fig_vex.add_vline(x=call_wall, line_width=1, line_dash="dash", line_color="#4db6ac", annotation_text="CW")
+    fig_vex.add_vline(x=put_wall, line_width=1, line_dash="dash", line_color="#e57373", annotation_text="PW")
+    
+    fig_vex.update_layout(title="Volatility Exposure (VEX) per Strike", template="plotly_dark", height=400)
+    st.plotly_chart(fig_vex, use_container_width=True)
+    
+    # VEX Summary moved below the chart
+    vsum_col1, vsum_col2, vsum_col3 = st.columns(3)
+    with vsum_col1:
+        st.metric("Total Portfolio VEX", fmt_val(net_vex))
+    with vsum_col2:
+        st.metric("VIX Price", f"{vix_price:.2f}")
+    with vsum_col3:
+        st.metric("13-Week T-Bill", f"{risk_free*100:.3f}%")
+    
+    st.info(f"**Interpretation:** Every 1% increase in Implied Volatility (IV) for this expiry is estimated to have a **{fmt_val(net_vex)}** dollar impact on aggregate market exposure.")
 
     st.subheader("VEX Raw Data")
-    # Show top 10 highest VEX strikes
     df_vex_table = df_table_full[['Strike', 'Type', 'OI', 'VEX']].sort_values('VEX', ascending=False)
     st.dataframe(df_vex_table, use_container_width=True, hide_index=True)
 
