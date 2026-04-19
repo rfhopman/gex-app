@@ -42,7 +42,6 @@ if is_weekday and (start_time <= now_est.time() <= end_time):
 def bs_greeks(S, K, T, r, iv, opt_type="Call"):
     if T <= 0 or iv <= 0 or S <= 0 or K <= 0: return 0.0, 0.0, 0.0
     d1 = (math.log(S/K) + (r + 0.5*iv*iv)*T) / (iv*math.sqrt(T))
-    d2 = d1 - iv * math.sqrt(T)
     pdf = (1.0 / math.sqrt(2*math.pi)) * math.exp(-0.5*d1*d1)
     
     gamma = pdf / (S * iv * math.sqrt(T))
@@ -133,7 +132,7 @@ try:
             gamma, vega, delta = bs_greeks(spot, K, T_main, risk_free, iv, opt_type)
             gex = gamma * OI * 100 * spot * spot * 0.01
             vex = vega * OI * 100 
-            dex = delta * OI * 100 * spot # Dollar Delta Exposure
+            dex = delta * OI * 100 * spot 
             
             if spot * 0.8 <= K <= spot * 1.2:
                 main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "vex": vex, "dex": dex, "type": opt_type, "oi": OI, "vol": vol})
@@ -151,13 +150,18 @@ try:
     put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"] if not df_calc.empty else 0
     
     # --- UI Layout ---
+    regime_val = "POSITIVE" if net_gex >= 0 else "NEGATIVE"
+    bg_color = "#d4edda" if net_gex >= 0 else "#f8d7da"
+    text_color = "#155724" if net_gex >= 0 else "#721c24"
+
     st.write("---")
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Spot", f"${spot:.2f}")
     m2.metric("Net GEX", fmt_val(net_gex))
-    m3.metric("Net VEX", fmt_val(net_vex))
-    m4.metric("Net DEX", fmt_val(net_dex))
-    m5.metric("Call-Wall", f"${call_wall:.2f}")
+    m3.metric("Call-Wall", f"${call_wall:.2f}")
+    with m4:
+        st.markdown(f'<div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; text-align: center; border: 1px solid {text_color};"><p style="margin:0; font-size:12px; color: #555;">Regime</p><p style="margin:0; font-size:18px; font-weight:bold; color: {text_color};">{regime_val}</p></div>', unsafe_allow_html=True)
+    m5.metric("Put-Wall", f"${put_wall:.2f}")
 
     # --- GEX CHART ---
     fig_main = go.Figure()
@@ -168,42 +172,44 @@ try:
     fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
 
+    # --- DATA TABLE ---
+    st.write("---")
+    st.subheader(f"Raw GEX Data: {ticker_input}")
+    st.dataframe(df_table_full.drop(columns=['VEX', 'DEX']), use_container_width=True, hide_index=True)
+
     # --- VEX SECTION ---
     st.write("---")
+    st.header("📉 VEX PROFILE (Volatility Exposure)")
     fig_vex = go.Figure()
     fig_vex.add_trace(go.Scatter(x=df_calc["strike"], y=df_calc["vex"], fill='tozeroy', line_color='#bb86fc', name="Net VEX"))
     fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_vex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
-    fig_vex.update_layout(title="VEX Profile (Volatility Exposure)", template="plotly_dark", height=400)
+    fig_vex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_vex, use_container_width=True)
+    st.metric("Total Net VEX", fmt_val(net_vex))
 
-    # --- DEX SECTION (NEW) ---
+    # --- DEX SECTION ---
     st.write("---")
     st.header("🎯 DEX PROFILE (Delta Exposure)")
-    
     fig_dex = go.Figure()
-    # Using a bar chart for DEX to show directional bias at each strike
     fig_dex.add_trace(go.Bar(x=df_calc["strike"], y=df_calc["dex"], marker_color="#ffa726", name="Net DEX"))
     fig_dex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_dex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_dex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
-    fig_dex.update_layout(title="Delta Exposure (DEX) per Strike", template="plotly_dark", height=400)
+    fig_dex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_dex, use_container_width=True)
-
+    
     dsum_col1, dsum_col2 = st.columns(2)
     with dsum_col1:
         st.metric("Total Net DEX", fmt_val(net_dex))
-        st.write("**Total Net DEX:** Sum of all option delta dollars. If highly positive, market makers are 'long' and may dampen volatility.")
     with dsum_col2:
         dex_regime = "STABLE / STICKY" if net_dex > 0 else "TRENDY / SLIPPERY"
-        st.info(f"**Market Regime:** {dex_regime}")
+        st.info(f"**Market Structure:** {dex_regime}")
 
-    st.subheader("DEX Raw Data")
-    df_dex_table = df_table_full[['Strike', 'Type', 'OI', 'DEX']].sort_values('DEX', ascending=False)
-    st.dataframe(df_dex_table, use_container_width=True, hide_index=True)
-
-    st.caption(f"Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
+    # --- FOOTER ---
+    st.write("---")
+    st.caption(f"Market Time: {market_time} | VIX: {vix_price:.2f} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
     st.error(f"Error: {e}")
