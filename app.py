@@ -149,7 +149,13 @@ try:
     call_wall = df_calc.loc[df_calc["gex"].idxmax(), "strike"] if not df_calc.empty else 0
     put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"] if not df_calc.empty else 0
     
-    # --- UI Layout ---
+    # --- AUTO-NOTIFICATION TRIGGER ---
+    if is_weekday and (start_time <= now_est.time() <= end_time):
+        if "last_notif" not in st.session_state or (pytime.time() - st.session_state.last_notif) > 800:
+            send_iphone_notification(ticker_input, selected_exp, spot, call_wall, put_wall)
+            st.session_state.last_notif = pytime.time()
+
+    # --- TOP METRICS ROW ---
     regime_val = "POSITIVE" if net_gex >= 0 else "NEGATIVE"
     bg_color = "#d4edda" if net_gex >= 0 else "#f8d7da"
     text_color = "#155724" if net_gex >= 0 else "#721c24"
@@ -172,10 +178,39 @@ try:
     fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
 
-    # --- DATA TABLE ---
+    # --- GAMMA HEAT MAP SECTION ---
     st.write("---")
-    st.subheader(f"Raw GEX Data: {ticker_input}")
-    st.dataframe(df_table_full.drop(columns=['VEX', 'DEX']), use_container_width=True, hide_index=True)
+    st.subheader("Gamma Heat Map")
+    heat_filter = st.radio("Heat Map Filter", options=["All", "Call", "Put"], index=0, horizontal=True)
+
+    with st.spinner("Generating Gamma Heat Map..."):
+        heatmap_exps = all_exps[:10]
+        heatmap_list = []
+        for exp in heatmap_exps:
+            e_ts = datetime.strptime(exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
+            T_heat = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
+            try:
+                c = tk.option_chain(exp)
+                for o_type, df_h_raw in [("Call", c.calls), ("Put", c.puts)]:
+                    if heat_filter != "All" and o_type != heat_filter: continue
+                    df_h = df_h_raw.copy()
+                    df_h_plot = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
+                    for _, row in df_h_plot.iterrows():
+                        K_h, OI_h, iv_h = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"])
+                        if iv_h <= 0: continue
+                        g = (1.0 / math.sqrt(2*math.pi) * math.exp(-0.5*((math.log(spot/K_h) + (risk_free + 0.5*iv_h*iv_h)*T_heat) / (iv_h*math.sqrt(T_heat)))**2)) / (spot * iv_h * math.sqrt(T_heat))
+                        gex_h = g * OI_h * 100 * spot * spot * 0.01
+                        heatmap_list.append({"expiry": exp, "strike": K_h, "netGEX": gex_h if o_type == "Call" else -gex_h})
+            except: continue
+        
+        if heatmap_list:
+            df_heat_long = pd.DataFrame(heatmap_list)
+            df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
+            custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
+            fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0))
+            fig_heat.add_vline(x=spot, line_width=4, line_color="black")
+            fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_heat, use_container_width=True)
 
     # --- VEX SECTION ---
     st.write("---")
@@ -206,6 +241,11 @@ try:
     with dsum_col2:
         dex_regime = "STABLE / STICKY" if net_dex > 0 else "TRENDY / SLIPPERY"
         st.info(f"**Market Structure:** {dex_regime}")
+
+    # --- DATA TABLE ---
+    st.write("---")
+    st.subheader(f"Raw GEX Data: {ticker_input}")
+    st.dataframe(df_table_full.drop(columns=['VEX', 'DEX']), use_container_width=True, hide_index=True)
 
     # --- FOOTER ---
     st.write("---")
