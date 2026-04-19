@@ -8,9 +8,10 @@ from datetime import datetime, timezone, time
 from zoneinfo import ZoneInfo
 import requests
 import time as pytime
+from scipy.stats import norm
 
 # --- Setup Page Configuration ---
-st.set_page_config(page_title="GEX & VEX Dashboard Pro", page_icon="📊", layout="wide")
+st.set_page_config(page_title="GEX, VEX & DEX Dashboard", page_icon="📊", layout="wide")
 
 # --- CUSTOM NOTIFICATION LOGIC ---
 NTFY_TOPIC = "GEX_Alerts" 
@@ -27,7 +28,7 @@ def send_iphone_notification(ticker, exp, spot, call_w, put_w):
     except Exception as e:
         return str(e)
 
-# --- AUTO-REFRESH & WEEKDAY LOGIC (Mon-Fri, 2 PM - 4:15 PM EST) ---
+# --- AUTO-REFRESH & WEEKDAY LOGIC ---
 now_est = datetime.now(ZoneInfo("America/New_York"))
 is_weekday = now_est.weekday() <= 4  
 start_time = time(14, 0)
@@ -38,13 +39,21 @@ if is_weekday and (start_time <= now_est.time() <= end_time):
     st_autorefresh(interval=15 * 60 * 1000, key="market_close_refresh")
 
 # --- Helpers ---
-def bs_greeks(S, K, T, r, iv):
-    if T <= 0 or iv <= 0 or S <= 0 or K <= 0: return 0.0, 0.0
+def bs_greeks(S, K, T, r, iv, opt_type="Call"):
+    if T <= 0 or iv <= 0 or S <= 0 or K <= 0: return 0.0, 0.0, 0.0
     d1 = (math.log(S/K) + (r + 0.5*iv*iv)*T) / (iv*math.sqrt(T))
+    d2 = d1 - iv * math.sqrt(T)
     pdf = (1.0 / math.sqrt(2*math.pi)) * math.exp(-0.5*d1*d1)
+    
     gamma = pdf / (S * iv * math.sqrt(T))
     vega = S * pdf * math.sqrt(T) * 0.01 
-    return gamma, vega
+    
+    if opt_type == "Call":
+        delta = norm.cdf(d1)
+    else:
+        delta = norm.cdf(d1) - 1
+        
+    return gamma, vega, delta
 
 def fmt_val(v):
     a, s = abs(v), ("+" if v >= 0 else "−")
@@ -64,7 +73,7 @@ def get_market_metrics():
         return 0.04, 0.0
 
 # --- TOP ROW CONTROLS ---
-st.title("📊 GEX & VEX DASHBOARD")
+st.title("📊 GEX, VEX & DEX DASHBOARD")
 
 with st.sidebar:
     st.write("### Notification Center")
@@ -121,91 +130,80 @@ try:
             K, OI, iv, vol = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"]), float(row["volume"])
             if iv <= 0 or K <= 0: continue
             
-            gamma, vega = bs_greeks(spot, K, T_main, risk_free, iv)
+            gamma, vega, delta = bs_greeks(spot, K, T_main, risk_free, iv, opt_type)
             gex = gamma * OI * 100 * spot * spot * 0.01
             vex = vega * OI * 100 
+            dex = delta * OI * 100 * spot # Dollar Delta Exposure
             
             if spot * 0.8 <= K <= spot * 1.2:
-                main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "vex": vex, "type": opt_type, "oi": OI, "vol": vol})
+                main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "vex": vex, "dex": dex, "type": opt_type, "oi": OI, "vol": vol})
             
-            table_rows.append({"Strike": K, "Type": opt_type, "OI": int(OI), "Volume": int(vol), "IV": f"{iv*100:.2f}%", "GEX": gex if opt_type == "Call" else -gex, "VEX": vex})
+            table_rows.append({"Strike": K, "Type": opt_type, "OI": int(OI), "Volume": int(vol), "IV": f"{iv*100:.2f}%", "GEX": gex if opt_type == "Call" else -gex, "VEX": vex, "DEX": dex})
 
     df_main = pd.DataFrame(main_list)
     df_table_full = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
-    df_calc = df_main.groupby("strike").agg({'gex': 'sum', 'vex': 'sum'}).reset_index().sort_values("strike")
+    df_calc = df_main.groupby("strike").agg({'gex': 'sum', 'vex': 'sum', 'dex': 'sum'}).reset_index().sort_values("strike")
     
     net_gex = df_calc["gex"].sum() if not df_calc.empty else 0
     net_vex = df_calc["vex"].sum() if not df_calc.empty else 0
+    net_dex = df_calc["dex"].sum() if not df_calc.empty else 0
     call_wall = df_calc.loc[df_calc["gex"].idxmax(), "strike"] if not df_calc.empty else 0
     put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"] if not df_calc.empty else 0
     
-    # --- AUTO-NOTIFICATION TRIGGER ---
-    if is_weekday and (start_time <= now_est.time() <= end_time):
-        if "last_notif" not in st.session_state or (pytime.time() - st.session_state.last_notif) > 800:
-            send_iphone_notification(ticker_input, selected_exp, spot, call_wall, put_wall)
-            st.session_state.last_notif = pytime.time()
-
     # --- UI Layout ---
-    regime_val = "POSITIVE" if net_gex >= 0 else "NEGATIVE"
-    bg_color = "#d4edda" if net_gex >= 0 else "#f8d7da"
-    text_color = "#155724" if net_gex >= 0 else "#721c24"
-
     st.write("---")
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Spot", f"${spot:.2f}")
     m2.metric("Net GEX", fmt_val(net_gex))
     m3.metric("Net VEX", fmt_val(net_vex))
-    m4.metric("Call-Wall", f"${call_wall:.2f}")
-    with m5:
-        st.markdown(f'<div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; text-align: center; border: 1px solid {text_color};"><p style="margin:0; font-size:12px; color: #555;">Regime</p><p style="margin:0; font-size:18px; font-weight:bold; color: {text_color};">{regime_val}</p></div>', unsafe_allow_html=True)
-    m6.metric("Put-Wall", f"${put_wall:.2f}")
+    m4.metric("Net DEX", fmt_val(net_dex))
+    m5.metric("Call-Wall", f"${call_wall:.2f}")
 
-    # --- MAIN GEX CHART ---
+    # --- GEX CHART ---
     fig_main = go.Figure()
     df_visual = df_main[df_main['oi'] >= min_oi_visual]
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX"))
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX"))
     fig_main.add_vline(x=spot, line_width=3, line_color="white", annotation_text="SPOT")
-    fig_main.update_layout(title="Gamma Exposure (GEX) by Strike", template="plotly_dark", height=400, barmode='relative')
+    fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
-
-    # --- DATA TABLE ---
-    st.write("---")
-    st.subheader(f"Raw GEX Data: {ticker_input}")
-    st.dataframe(df_table_full.drop(columns=['VEX']), use_container_width=True, hide_index=True)
 
     # --- VEX SECTION ---
     st.write("---")
-    st.header("📉 VEX PROFILE (Volatility Exposure)")
-    
-    # VEX Profile Chart
     fig_vex = go.Figure()
     fig_vex.add_trace(go.Scatter(x=df_calc["strike"], y=df_calc["vex"], fill='tozeroy', line_color='#bb86fc', name="Net VEX"))
-    
-    # Markers for Spot, Call Wall, and Put Wall (Solid Lines)
     fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_vex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
-    
-    fig_vex.update_layout(title="Volatility Exposure (VEX) per Strike", template="plotly_dark", height=400)
+    fig_vex.update_layout(title="VEX Profile (Volatility Exposure)", template="plotly_dark", height=400)
     st.plotly_chart(fig_vex, use_container_width=True)
-    
-    # VEX Summary Summary metrics
-    vsum_col1, vsum_col2, vsum_col3 = st.columns(3)
-    with vsum_col1:
-        st.metric("Total Portfolio VEX", fmt_val(net_vex))
-    with vsum_col2:
-        st.metric("VIX Price", f"{vix_price:.2f}")
-    with vsum_col3:
-        st.metric("13-Week T-Bill", f"{risk_free*100:.3f}%")
-    
-    st.info(f"**Interpretation:** Every 1% increase in Implied Volatility (IV) for this expiry is estimated to have a **{fmt_val(net_vex)}** dollar impact on aggregate market exposure.")
 
-    st.subheader("VEX Raw Data")
-    df_vex_table = df_table_full[['Strike', 'Type', 'OI', 'VEX']].sort_values('VEX', ascending=False)
-    st.dataframe(df_vex_table, use_container_width=True, hide_index=True)
+    # --- DEX SECTION (NEW) ---
+    st.write("---")
+    st.header("🎯 DEX PROFILE (Delta Exposure)")
+    
+    fig_dex = go.Figure()
+    # Using a bar chart for DEX to show directional bias at each strike
+    fig_dex.add_trace(go.Bar(x=df_calc["strike"], y=df_calc["dex"], marker_color="#ffa726", name="Net DEX"))
+    fig_dex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
+    fig_dex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
+    fig_dex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
+    fig_dex.update_layout(title="Delta Exposure (DEX) per Strike", template="plotly_dark", height=400)
+    st.plotly_chart(fig_dex, use_container_width=True)
 
-    st.caption(f"Market Time: {market_time} | Data provided by Yahoo Finance")
+    dsum_col1, dsum_col2 = st.columns(2)
+    with dsum_col1:
+        st.metric("Total Net DEX", fmt_val(net_dex))
+        st.write("**Total Net DEX:** Sum of all option delta dollars. If highly positive, market makers are 'long' and may dampen volatility.")
+    with dsum_col2:
+        dex_regime = "STABLE / STICKY" if net_dex > 0 else "TRENDY / SLIPPERY"
+        st.info(f"**Market Regime:** {dex_regime}")
+
+    st.subheader("DEX Raw Data")
+    df_dex_table = df_table_full[['Strike', 'Type', 'OI', 'DEX']].sort_values('DEX', ascending=False)
+    st.dataframe(df_dex_table, use_container_width=True, hide_index=True)
+
+    st.caption(f"Market Time: {market_time} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
     st.error(f"Error: {e}")
