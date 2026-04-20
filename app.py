@@ -217,7 +217,7 @@ try:
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True)
 
-    # --- VEX SECTION ---
+    # --- VEX SECTION (BAR CHART) ---
     st.write("---")
     st.header("📉 VEX PROFILE (Volatility Exposure)")
     vex_filter = st.radio("VEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="vex_filter")
@@ -225,7 +225,7 @@ try:
     df_calc_vex = df_vex_plot.groupby("strike").agg({'vex': 'sum'}).reset_index().sort_values("strike")
     
     fig_vex = go.Figure()
-    fig_vex.add_trace(go.Scatter(x=df_calc_vex["strike"], y=df_calc_vex["vex"], fill='tozeroy', line_color='#bb86fc', name=f"{vex_filter} VEX"))
+    fig_vex.add_trace(go.Bar(x=df_calc_vex["strike"], y=df_calc_vex["vex"], marker_color='#bb86fc', name=f"{vex_filter} VEX"))
     fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_vex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
@@ -253,7 +253,7 @@ try:
     with st.expander("📝 DEX Outcome & Usage"):
         st.write("**Outcome:** Directional market pressure. **Usage:** Positive DEX = 'Sticky'; Negative DEX = 'Slippery'.")
 
-    # --- CEX SECTION ---
+    # --- CEX SECTION (BAR CHART) ---
     st.write("---")
     st.header("⏳ CEX PROFILE (Charm/Delta Decay)")
     cex_filter = st.radio("CEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="cex_filter")
@@ -261,7 +261,7 @@ try:
     df_calc_cex = df_cex_plot.groupby("strike").agg({'cex': 'sum'}).reset_index().sort_values("strike")
 
     fig_cex = go.Figure()
-    fig_cex.add_trace(go.Scatter(x=df_calc_cex["strike"], y=df_calc_cex["cex"], fill='tozeroy', line_color='#03dac6', name=f"{cex_filter} CEX"))
+    fig_cex.add_trace(go.Bar(x=df_calc_cex["strike"], y=df_calc_cex["cex"], marker_color='#03dac6', name=f"{cex_filter} CEX"))
     fig_cex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_cex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_cex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
