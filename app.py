@@ -57,9 +57,9 @@ def bs_greeks(S, K, T, r, iv, opt_type="Call"):
 
 def fmt_val(v):
     a, s = abs(v), ("+" if v >= 0 else "−")
-    if a >= 1e9: return f"{s}${a/1e9:.2f}B"
-    if a >= 1e6: return f"{s}${a/1e6:.1f}M"
-    return f"{s}${a:.0f}"
+    if a >= 1e9: return f"{s}$ {a/1e9:.2f}B"
+    if a >= 1e6: return f"{s}$ {a/1e6:.1f}M"
+    return f"{s}$ {a:.0f}"
 
 @st.cache_data(ttl=300)
 def get_market_metrics():
@@ -150,8 +150,12 @@ try:
     put_wall = df_calc_all.loc[df_calc_all["gex"].idxmin(), "strike"] if not df_calc_all.empty else 0
     
     # --- GAMMA FLIP CALC ---
-    zero_cross = df_calc_all.iloc[(df_calc_all['gex'] * df_calc_all['gex'].shift(1) < 0).idxmax()]
-    gamma_flip = zero_cross['strike'] if not df_calc_all.empty else 0
+    zero_cross_g = df_calc_all.iloc[(df_calc_all['gex'] * df_calc_all['gex'].shift(1) < 0).idxmax()] if not df_calc_all.empty else None
+    gamma_flip = zero_cross_g['strike'] if zero_cross_g is not None else 0
+
+    # --- VANNA FLIP (LIS) CALC ---
+    zero_cross_v = df_calc_all.iloc[(df_calc_all['vex'] * df_calc_all['vex'].shift(1) < 0).idxmax()] if not df_calc_all.empty else None
+    vanna_flip = zero_cross_v['strike'] if zero_cross_v is not None else 0
     
     # --- TOP METRICS ---
     regime_val = "POSITIVE" if net_gex >= 0 else "NEGATIVE"
@@ -159,14 +163,15 @@ try:
     text_color = "#155724" if net_gex >= 0 else "#721c24"
 
     st.write("---")
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
     m1.metric("Spot", f"${spot:.2f}")
     m2.metric("Net GEX", fmt_val(net_gex))
-    m3.metric("Flip", f"${gamma_flip:.2f}")
-    m4.metric("Call-Wall", f"${call_wall:.2f}")
-    with m5:
+    m3.metric("G-Flip", f"${gamma_flip:.2f}")
+    m4.metric("V-LIS", f"${vanna_flip:.2f}")
+    m5.metric("Call-Wall", f"${call_wall:.2f}")
+    with m6:
         st.markdown(f'<div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; text-align: center; border: 1px solid {text_color};"><p style="margin:0; font-size:12px; color: #555;">Regime</p><p style="margin:0; font-size:18px; font-weight:bold; color: {text_color};">{regime_val}</p></div>', unsafe_allow_html=True)
-    m6.metric("Put-Wall", f"${put_wall:.2f}")
+    m7.metric("Put-Wall", f"${put_wall:.2f}")
 
     # --- GEX CHART ---
     fig_main = go.Figure()
@@ -174,7 +179,7 @@ try:
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX"))
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX"))
     fig_main.add_vline(x=spot, line_width=3, line_color="black", annotation_text="SPOT")
-    fig_main.add_vline(x=gamma_flip, line_width=2, line_color="orange", annotation_text="FLIP")
+    fig_main.add_vline(x=gamma_flip, line_width=2, line_color="orange", annotation_text="G-FLIP")
     fig_main.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_main.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
@@ -227,6 +232,7 @@ try:
     fig_vex = go.Figure()
     fig_vex.add_trace(go.Bar(x=df_calc_vex["strike"], y=df_calc_vex["vex"], marker_color='#bb86fc', name=f"{vex_filter} VEX"))
     fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
+    fig_vex.add_vline(x=vanna_flip, line_width=2, line_color="yellow", annotation_text="LIS")
     fig_vex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_vex.update_layout(template="plotly_dark", height=400)
