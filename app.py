@@ -168,7 +168,7 @@ try:
     df_visual = df_main[df_main['oi'] >= min_oi_visual]
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX"))
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX"))
-    fig_main.add_vline(x=spot, line_width=3, line_color="white", annotation_text="SPOT")
+    fig_main.add_vline(x=spot, line_width=3, line_color="black", annotation_text="SPOT")
     fig_main.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_main.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
@@ -207,7 +207,7 @@ try:
             df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
             custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
             fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0, hovertemplate="<b>Exp:</b> %{y}<br><b>Strike:</b> %{x}<br><b>GEX:</b> %{z:,.0f}<extra></extra>"))
-            fig_heat.add_vline(x=spot, line_width=4, line_color="black")
+            fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True)
 
@@ -220,7 +220,7 @@ try:
     
     fig_vex = go.Figure()
     fig_vex.add_trace(go.Scatter(x=df_calc_vex["strike"], y=df_calc_vex["vex"], fill='tozeroy', line_color='#bb86fc', name=f"{vex_filter} VEX"))
-    fig_vex.add_vline(x=spot, line_width=2, line_color="white", annotation_text="SPOT")
+    fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_vex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_vex.update_layout(template="plotly_dark", height=400)
@@ -238,7 +238,7 @@ try:
 
     fig_dex = go.Figure()
     fig_dex.add_trace(go.Bar(x=df_calc_dex["strike"], y=df_calc_dex["dex"], marker_color="#ffa726", name=f"{dex_filter} DEX"))
-    fig_dex.add_vline(x=spot, line_width=2, line_color="white", annotation_text="SPOT")
+    fig_dex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_dex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_dex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_dex.update_layout(template="plotly_dark", height=400)
@@ -256,7 +256,7 @@ try:
 
     fig_cex = go.Figure()
     fig_cex.add_trace(go.Scatter(x=df_calc_cex["strike"], y=df_calc_cex["cex"], fill='tozeroy', line_color='#03dac6', name=f"{cex_filter} CEX"))
-    fig_cex.add_vline(x=spot, line_width=2, line_color="white", annotation_text="SPOT")
+    fig_cex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_cex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_cex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_cex.update_layout(template="plotly_dark", height=400)
