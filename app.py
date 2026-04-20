@@ -49,7 +49,6 @@ def bs_greeks(S, K, T, r, iv, opt_type="Call"):
     vega = S * pdf * math.sqrt(T) * 0.01 
     delta = norm.cdf(d1) if opt_type == "Call" else norm.cdf(d1) - 1
     
-    # Charm Calculation (Delta Decay)
     charm = -pdf * ( (r / (iv * math.sqrt(T))) - (d2 / (2 * T)) )
     if opt_type == "Put":
         charm = charm + (r * norm.cdf(-d1))
@@ -145,12 +144,12 @@ try:
     df_main = pd.DataFrame(main_list)
     df_table_full = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
     
-    # --- TOP METRICS ROW & WALL CALCULATIONS ---
     df_calc_all = df_main.groupby("strike").agg({'gex': 'sum', 'vex': 'sum', 'dex': 'sum', 'cex': 'sum'}).reset_index().sort_values("strike")
     net_gex = df_calc_all["gex"].sum() if not df_calc_all.empty else 0
     call_wall = df_calc_all.loc[df_calc_all["gex"].idxmax(), "strike"] if not df_calc_all.empty else 0
     put_wall = df_calc_all.loc[df_calc_all["gex"].idxmin(), "strike"] if not df_calc_all.empty else 0
     
+    # --- TOP METRICS ---
     regime_val = "POSITIVE" if net_gex >= 0 else "NEGATIVE"
     bg_color = "#d4edda" if net_gex >= 0 else "#f8d7da"
     text_color = "#155724" if net_gex >= 0 else "#721c24"
@@ -170,13 +169,15 @@ try:
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX"))
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX"))
     fig_main.add_vline(x=spot, line_width=3, line_color="white", annotation_text="SPOT")
+    fig_main.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
+    fig_main.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
     
     with st.expander("📝 GEX Outcome & Usage"):
         st.write("**Outcome:** Identifies supply/demand zones. **Usage:** Positive GEX = Range-bound; Negative GEX = Trending.")
 
-    # --- GAMMA HEAT MAP SECTION ---
+    # --- GAMMA HEAT MAP ---
     st.write("---")
     st.subheader("Gamma Heat Map")
     heat_filter = st.radio("Heat Map Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="heat_filter")
@@ -214,15 +215,14 @@ try:
     st.write("---")
     st.header("📉 VEX PROFILE (Volatility Exposure)")
     vex_filter = st.radio("VEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="vex_filter")
-    
     df_vex_plot = df_main if vex_filter == "All" else df_main[df_main['type'] == vex_filter]
     df_calc_vex = df_vex_plot.groupby("strike").agg({'vex': 'sum'}).reset_index().sort_values("strike")
     
     fig_vex = go.Figure()
     fig_vex.add_trace(go.Scatter(x=df_calc_vex["strike"], y=df_calc_vex["vex"], fill='tozeroy', line_color='#bb86fc', name=f"{vex_filter} VEX"))
     fig_vex.add_vline(x=spot, line_width=2, line_color="white", annotation_text="SPOT")
-    fig_vex.add_vline(x=call_wall, line_width=2, line_dash="dash", line_color="#4db6ac", annotation_text="CW")
-    fig_vex.add_vline(x=put_wall, line_width=2, line_dash="dash", line_color="#e57373", annotation_text="PW")
+    fig_vex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
+    fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_vex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_vex, use_container_width=True)
     st.metric(f"Total {vex_filter} VEX", fmt_val(df_calc_vex["vex"].sum()))
@@ -233,34 +233,32 @@ try:
     st.write("---")
     st.header("🎯 DEX PROFILE (Delta Exposure)")
     dex_filter = st.radio("DEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="dex_filter")
-    
     df_dex_plot = df_main if dex_filter == "All" else df_main[df_main['type'] == dex_filter]
     df_calc_dex = df_dex_plot.groupby("strike").agg({'dex': 'sum'}).reset_index().sort_values("strike")
 
     fig_dex = go.Figure()
     fig_dex.add_trace(go.Bar(x=df_calc_dex["strike"], y=df_calc_dex["dex"], marker_color="#ffa726", name=f"{dex_filter} DEX"))
     fig_dex.add_vline(x=spot, line_width=2, line_color="white", annotation_text="SPOT")
-    fig_dex.add_vline(x=call_wall, line_width=2, line_dash="dash", line_color="#4db6ac", annotation_text="CW")
-    fig_dex.add_vline(x=put_wall, line_width=2, line_dash="dash", line_color="#e57373", annotation_text="PW")
+    fig_dex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
+    fig_dex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_dex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_dex, use_container_width=True)
     st.metric(f"Total {dex_filter} DEX", fmt_val(df_calc_dex["dex"].sum()))
     with st.expander("📝 DEX Outcome & Usage"):
-        st.write("**Outcome:** Directional market pressure. **Usage:** Positive DEX = 'Sticky' (Good for ICs); Negative DEX = 'Slippery'.")
+        st.write("**Outcome:** Directional market pressure. **Usage:** Positive DEX = 'Sticky'; Negative DEX = 'Slippery'.")
 
     # --- CEX SECTION ---
     st.write("---")
     st.header("⏳ CEX PROFILE (Charm/Delta Decay)")
     cex_filter = st.radio("CEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="cex_filter")
-    
     df_cex_plot = df_main if cex_filter == "All" else df_main[df_main['type'] == cex_filter]
     df_calc_cex = df_cex_plot.groupby("strike").agg({'cex': 'sum'}).reset_index().sort_values("strike")
 
     fig_cex = go.Figure()
     fig_cex.add_trace(go.Scatter(x=df_calc_cex["strike"], y=df_calc_cex["cex"], fill='tozeroy', line_color='#03dac6', name=f"{cex_filter} CEX"))
     fig_cex.add_vline(x=spot, line_width=2, line_color="white", annotation_text="SPOT")
-    fig_cex.add_vline(x=call_wall, line_width=2, line_dash="dash", line_color="#4db6ac", annotation_text="CW")
-    fig_cex.add_vline(x=put_wall, line_width=2, line_dash="dash", line_color="#e57373", annotation_text="PW")
+    fig_cex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
+    fig_cex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_cex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_cex, use_container_width=True)
     st.metric(f"Total {cex_filter} CEX", fmt_val(df_calc_cex["cex"].sum()))
