@@ -236,7 +236,7 @@ try:
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True)
 
-    # --- VEX SECTION (BAR CHART) ---
+    # --- VEX SECTION ---
     st.write("---")
     st.header("📉 VEX PROFILE (Volatility Exposure)")
     vex_filter = st.radio("VEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="vex_filter")
@@ -265,7 +265,7 @@ try:
     fig_dex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_dex, use_container_width=True)
 
-    # --- CEX SECTION (BAR CHART) ---
+    # --- CEX SECTION ---
     st.write("---")
     st.header("⏳ CEX PROFILE (Charm/Delta Decay)")
     cex_filter = st.radio("CEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="cex_filter")
@@ -283,16 +283,21 @@ try:
     st.subheader(f"Raw Data: {ticker_input}")
     st.dataframe(df_table_full, use_container_width=True, hide_index=True)
 
-    # --- VIX INTRADAY LINE GRAPH (YAHOO DATA FIX) ---
+    # --- VIX INTRADAY LINE GRAPH (TIME FILTER FIX) ---
     st.write("---")
     st.subheader("📉 Today's VIX Intraday (15m Intervals)")
     try:
         # Pull 15m interval data from Yahoo
         vix_raw = yf.download("^VIX", period="1d", interval="15m")
         if not vix_raw.empty:
-            # Flatten MultiIndex if present (common in newer yfinance)
             if isinstance(vix_raw.columns, pd.MultiIndex):
                 vix_raw.columns = vix_raw.columns.get_level_values(0)
+            
+            # Ensure index is in NY time
+            vix_raw.index = vix_raw.index.tz_convert(ZoneInfo("America/New_York"))
+            
+            # Filter for standard market hours (9:30 AM to 4:15 PM)
+            vix_raw = vix_raw.between_time("09:30", "16:15")
             
             fig_vix_intra = go.Figure()
             fig_vix_intra.add_trace(go.Scatter(
@@ -306,12 +311,12 @@ try:
                 template="plotly_dark", 
                 height=350, 
                 margin=dict(l=10, r=10, t=10, b=10),
-                xaxis_title="Time (EST)",
-                yaxis_title="VIX"
+                xaxis_title="NY Time",
+                yaxis_title="VIX Value"
             )
             st.plotly_chart(fig_vix_intra, use_container_width=True)
         else:
-            st.warning("No intraday VIX data found for today yet.")
+            st.warning("No intraday VIX data available.")
     except Exception as ve:
         st.error(f"Could not load VIX chart: {ve}")
 
