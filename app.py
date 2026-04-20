@@ -17,7 +17,7 @@ st.set_page_config(page_title="GEX, VEX, DEX & CEX Dashboard", page_icon="📊",
 NTFY_TOPIC = "GEX_Alerts" 
 
 def send_iphone_notification(ticker, exp, spot, call_w, put_w):
-    # Standard message format as requested
+    # Standard message format
     msg = f"🚨 {ticker} ({exp}): Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
     
     try:
@@ -169,9 +169,8 @@ try:
         zero_cross_v = df_calc_all.iloc[(df_calc_all['vex'] * df_calc_all['vex'].shift(1) < 0).idxmax()]
         vanna_flip = zero_cross_v['strike']
 
-    # --- ACTIVE NOTIFICATION TRIGGER (WITH TIME CUTOFF) ---
+    # --- ACTIVE NOTIFICATION TRIGGER ---
     if is_market_active:
-        # Trigger regular message if Spot is near walls
         if abs(spot - call_wall) / spot < 0.005 or abs(spot - put_wall) / spot < 0.005:
             send_iphone_notification(ticker_input, selected_exp, spot, call_wall, put_wall)
     
@@ -284,30 +283,35 @@ try:
     st.subheader(f"Raw Data: {ticker_input}")
     st.dataframe(df_table_full, use_container_width=True, hide_index=True)
 
-    # --- VIX INTRADAY LINE GRAPH ---
+    # --- VIX INTRADAY LINE GRAPH (YAHOO DATA FIX) ---
     st.write("---")
     st.subheader("📉 Today's VIX Intraday (15m Intervals)")
     try:
-        vix_data = yf.download("^VIX", period="1d", interval="15m")
-        if not vix_data.empty:
+        # Pull 15m interval data from Yahoo
+        vix_raw = yf.download("^VIX", period="1d", interval="15m")
+        if not vix_raw.empty:
+            # Flatten MultiIndex if present (common in newer yfinance)
+            if isinstance(vix_raw.columns, pd.MultiIndex):
+                vix_raw.columns = vix_raw.columns.get_level_values(0)
+            
             fig_vix_intra = go.Figure()
             fig_vix_intra.add_trace(go.Scatter(
-                x=vix_data.index, 
-                y=vix_data['Close'], 
+                x=vix_raw.index, 
+                y=vix_raw['Close'], 
                 mode='lines+markers', 
                 line=dict(color='#ff5252', width=2),
                 name="VIX"
             ))
             fig_vix_intra.update_layout(
                 template="plotly_dark", 
-                height=300, 
+                height=350, 
                 margin=dict(l=10, r=10, t=10, b=10),
-                xaxis_title="Time",
-                yaxis_title="VIX Value"
+                xaxis_title="Time (EST)",
+                yaxis_title="VIX"
             )
             st.plotly_chart(fig_vix_intra, use_container_width=True)
         else:
-            st.warning("VIX intraday data currently unavailable.")
+            st.warning("No intraday VIX data found for today yet.")
     except Exception as ve:
         st.error(f"Could not load VIX chart: {ve}")
 
