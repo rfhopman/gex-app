@@ -145,7 +145,7 @@ try:
     df_main = pd.DataFrame(main_list)
     df_table_full = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
     
-    # --- TOP METRICS ROW ---
+    # --- TOP METRICS ROW & WALL CALCULATIONS ---
     df_calc_all = df_main.groupby("strike").agg({'gex': 'sum', 'vex': 'sum', 'dex': 'sum', 'cex': 'sum'}).reset_index().sort_values("strike")
     net_gex = df_calc_all["gex"].sum() if not df_calc_all.empty else 0
     call_wall = df_calc_all.loc[df_calc_all["gex"].idxmax(), "strike"] if not df_calc_all.empty else 0
@@ -220,7 +220,9 @@ try:
     
     fig_vex = go.Figure()
     fig_vex.add_trace(go.Scatter(x=df_calc_vex["strike"], y=df_calc_vex["vex"], fill='tozeroy', line_color='#bb86fc', name=f"{vex_filter} VEX"))
-    fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
+    fig_vex.add_vline(x=spot, line_width=2, line_color="white", annotation_text="SPOT")
+    fig_vex.add_vline(x=call_wall, line_width=2, line_dash="dash", line_color="#4db6ac", annotation_text="CW")
+    fig_vex.add_vline(x=put_wall, line_width=2, line_dash="dash", line_color="#e57373", annotation_text="PW")
     fig_vex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_vex, use_container_width=True)
     st.metric(f"Total {vex_filter} VEX", fmt_val(df_calc_vex["vex"].sum()))
@@ -237,7 +239,9 @@ try:
 
     fig_dex = go.Figure()
     fig_dex.add_trace(go.Bar(x=df_calc_dex["strike"], y=df_calc_dex["dex"], marker_color="#ffa726", name=f"{dex_filter} DEX"))
-    fig_dex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
+    fig_dex.add_vline(x=spot, line_width=2, line_color="white", annotation_text="SPOT")
+    fig_dex.add_vline(x=call_wall, line_width=2, line_dash="dash", line_color="#4db6ac", annotation_text="CW")
+    fig_dex.add_vline(x=put_wall, line_width=2, line_dash="dash", line_color="#e57373", annotation_text="PW")
     fig_dex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_dex, use_container_width=True)
     st.metric(f"Total {dex_filter} DEX", fmt_val(df_calc_dex["dex"].sum()))
@@ -254,7 +258,9 @@ try:
 
     fig_cex = go.Figure()
     fig_cex.add_trace(go.Scatter(x=df_calc_cex["strike"], y=df_calc_cex["cex"], fill='tozeroy', line_color='#03dac6', name=f"{cex_filter} CEX"))
-    fig_cex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
+    fig_cex.add_vline(x=spot, line_width=2, line_color="white", annotation_text="SPOT")
+    fig_cex.add_vline(x=call_wall, line_width=2, line_dash="dash", line_color="#4db6ac", annotation_text="CW")
+    fig_cex.add_vline(x=put_wall, line_width=2, line_dash="dash", line_color="#e57373", annotation_text="PW")
     fig_cex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_cex, use_container_width=True)
     st.metric(f"Total {cex_filter} CEX", fmt_val(df_calc_cex["cex"].sum()))
