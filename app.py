@@ -11,7 +11,7 @@ import time as pytime
 from scipy.stats import norm
 
 # --- Setup Page Configuration ---
-st.set_page_config(page_title="GEX, VEX & DEX Dashboard", page_icon="📊", layout="wide")
+st.set_page_config(page_title="GEX, VEX, DEX & CEX Dashboard", page_icon="📊", layout="wide")
 
 # --- CUSTOM NOTIFICATION LOGIC ---
 NTFY_TOPIC = "GEX_Alerts" 
@@ -40,19 +40,21 @@ if is_weekday and (start_time <= now_est.time() <= end_time):
 
 # --- Helpers ---
 def bs_greeks(S, K, T, r, iv, opt_type="Call"):
-    if T <= 0 or iv <= 0 or S <= 0 or K <= 0: return 0.0, 0.0, 0.0
+    if T <= 0 or iv <= 0 or S <= 0 or K <= 0: return 0.0, 0.0, 0.0, 0.0
     d1 = (math.log(S/K) + (r + 0.5*iv*iv)*T) / (iv*math.sqrt(T))
+    d2 = d1 - iv * math.sqrt(T)
     pdf = (1.0 / math.sqrt(2*math.pi)) * math.exp(-0.5*d1*d1)
     
     gamma = pdf / (S * iv * math.sqrt(T))
     vega = S * pdf * math.sqrt(T) * 0.01 
+    delta = norm.cdf(d1) if opt_type == "Call" else norm.cdf(d1) - 1
     
-    if opt_type == "Call":
-        delta = norm.cdf(d1)
-    else:
-        delta = norm.cdf(d1) - 1
+    # Charm Calculation (Delta Decay)
+    charm = -pdf * ( (r / (iv * math.sqrt(T))) - (d2 / (2 * T)) )
+    if opt_type == "Put":
+        charm = charm + (r * norm.cdf(-d1))
         
-    return gamma, vega, delta
+    return gamma, vega, delta, charm
 
 def fmt_val(v):
     a, s = abs(v), ("+" if v >= 0 else "−")
@@ -72,7 +74,7 @@ def get_market_metrics():
         return 0.04, 0.0
 
 # --- TOP ROW CONTROLS ---
-st.title("📊 GEX, VEX & DEX DASHBOARD")
+st.title("📊 GEX, VEX, DEX & CEX DASHBOARD")
 
 with st.sidebar:
     st.write("### Notification Center")
@@ -129,23 +131,25 @@ try:
             K, OI, iv, vol = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"]), float(row["volume"])
             if iv <= 0 or K <= 0: continue
             
-            gamma, vega, delta = bs_greeks(spot, K, T_main, risk_free, iv, opt_type)
+            gamma, vega, delta, charm = bs_greeks(spot, K, T_main, risk_free, iv, opt_type)
             gex = gamma * OI * 100 * spot * spot * 0.01
             vex = vega * OI * 100 
             dex = delta * OI * 100 * spot 
+            cex = charm * OI * 100 * spot # Charm Exposure
             
             if spot * 0.8 <= K <= spot * 1.2:
-                main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "vex": vex, "dex": dex, "type": opt_type, "oi": OI, "vol": vol})
+                main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "vex": vex, "dex": dex, "cex": cex, "type": opt_type, "oi": OI, "vol": vol})
             
-            table_rows.append({"Strike": K, "Type": opt_type, "OI": int(OI), "Volume": int(vol), "IV": f"{iv*100:.2f}%", "GEX": gex if opt_type == "Call" else -gex, "VEX": vex, "DEX": dex})
+            table_rows.append({"Strike": K, "Type": opt_type, "OI": int(OI), "Volume": int(vol), "IV": f"{iv*100:.2f}%", "GEX": gex if opt_type == "Call" else -gex, "VEX": vex, "DEX": dex, "CEX": cex})
 
     df_main = pd.DataFrame(main_list)
     df_table_full = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
-    df_calc = df_main.groupby("strike").agg({'gex': 'sum', 'vex': 'sum', 'dex': 'sum'}).reset_index().sort_values("strike")
+    df_calc = df_main.groupby("strike").agg({'gex': 'sum', 'vex': 'sum', 'dex': 'sum', 'cex': 'sum'}).reset_index().sort_values("strike")
     
     net_gex = df_calc["gex"].sum() if not df_calc.empty else 0
     net_vex = df_calc["vex"].sum() if not df_calc.empty else 0
     net_dex = df_calc["dex"].sum() if not df_calc.empty else 0
+    net_cex = df_calc["cex"].sum() if not df_calc.empty else 0
     call_wall = df_calc.loc[df_calc["gex"].idxmax(), "strike"] if not df_calc.empty else 0
     put_wall = df_calc.loc[df_calc["gex"].idxmin(), "strike"] if not df_calc.empty else 0
     
@@ -173,12 +177,7 @@ try:
     st.plotly_chart(fig_main, use_container_width=True)
     
     with st.expander("📝 GEX Outcome & Usage"):
-        st.write("""
-        **Outcome:** Identifies significant supply/demand zones where market makers must hedge.
-        **Usage for Iron Condors:**
-        - **Positive GEX:** Market is likely to be range-bound. Set Iron Condor wings outside the major GEX peaks.
-        - **Negative GEX:** Market is 'explosive'. Avoid tight Iron Condors as price moves will be accelerated by dealer hedging.
-        """)
+        st.write("**Outcome:** Identifies supply/demand zones. **Usage:** Use for strike selection. Positive GEX = Range-bound; Negative GEX = Trending.")
 
     # --- GAMMA HEAT MAP SECTION ---
     st.write("---")
@@ -200,7 +199,7 @@ try:
                     for _, row in df_h_plot.iterrows():
                         K_h, OI_h, iv_h = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"])
                         if iv_h <= 0: continue
-                        g = (1.0 / math.sqrt(2*math.pi) * math.exp(-0.5*((math.log(spot/K_h) + (risk_free + 0.5*iv_h*iv_h)*T_heat) / (iv_h*math.sqrt(T_heat)))**2)) / (spot * iv_h * math.sqrt(T_heat))
+                        g, _, _, _ = bs_greeks(spot, K_h, T_heat, risk_free, iv_h, o_type)
                         gex_h = g * OI_h * 100 * spot * spot * 0.01
                         heatmap_list.append({"expiry": exp, "strike": K_h, "netGEX": gex_h if o_type == "Call" else -gex_h})
             except: continue
@@ -209,11 +208,7 @@ try:
             df_heat_long = pd.DataFrame(heatmap_list)
             df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
             custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
-            fig_heat = go.Figure(data=go.Heatmap(
-                z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, 
-                colorscale=custom_rdwgn, zmid=0,
-                hovertemplate="<b>Exp:</b> %{y}<br><b>Strike:</b> %{x}<br><b>GEX:</b> %{z:,.0f}<extra></extra>"
-            ))
+            fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0, hovertemplate="<b>Exp:</b> %{y}<br><b>Strike:</b> %{x}<br><b>GEX:</b> %{z:,.0f}<extra></extra>"))
             fig_heat.add_vline(x=spot, line_width=4, line_color="black")
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True)
@@ -224,19 +219,11 @@ try:
     fig_vex = go.Figure()
     fig_vex.add_trace(go.Scatter(x=df_calc["strike"], y=df_calc["vex"], fill='tozeroy', line_color='#bb86fc', name="Net VEX"))
     fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
-    fig_vex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
-    fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_vex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_vex, use_container_width=True)
     st.metric("Total Net VEX", fmt_val(net_vex))
-
     with st.expander("📝 VEX Outcome & Usage"):
-        st.write("""
-        **Outcome:** Measures portfolio sensitivity to changes in Implied Volatility (IV).
-        **Usage for Iron Condors:**
-        - High VEX spikes indicate strikes that will lose value rapidly if volatility drops (good for sellers).
-        - Watch the VEX at your short strikes; a spike in IV will expand these values, potentially putting your Condor under stress even if price remains still.
-        """)
+        st.write("**Outcome:** Volatility sensitivity. **Usage:** Watch for IV spikes expanding the value of your short strikes.")
 
     # --- DEX SECTION ---
     st.write("---")
@@ -244,30 +231,28 @@ try:
     fig_dex = go.Figure()
     fig_dex.add_trace(go.Bar(x=df_calc["strike"], y=df_calc["dex"], marker_color="#ffa726", name="Net DEX"))
     fig_dex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
-    fig_dex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
-    fig_dex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_dex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_dex, use_container_width=True)
-    
-    dsum_col1, dsum_col2 = st.columns(2)
-    with dsum_col1:
-        st.metric("Total Net DEX", fmt_val(net_dex))
-    with dsum_col2:
-        dex_regime = "STABLE / STICKY" if net_dex > 0 else "TRENDY / SLIPPERY"
-        st.info(f"**Market Structure:** {dex_regime}")
-
+    st.metric("Total Net DEX", fmt_val(net_dex))
     with st.expander("📝 DEX Outcome & Usage"):
-        st.write("""
-        **Outcome:** Quantifies the directional pressure from the options market.
-        **Usage for Iron Condors:**
-        - **Positive DEX:** Market is "sticky" and mean-reverting. This is the ideal environment for 0DTE Iron Condors.
-        - **Negative DEX:** Market is "slippery" and prone to trending. Be extremely cautious as the price could run through your short strikes easily.
-        """)
+        st.write("**Outcome:** Directional market pressure. **Usage:** Positive DEX = 'Sticky' (Good for ICs); Negative DEX = 'Slippery' (Bad for ICs).")
+
+    # --- CEX SECTION ---
+    st.write("---")
+    st.header("⏳ CEX PROFILE (Charm/Delta Decay)")
+    fig_cex = go.Figure()
+    fig_cex.add_trace(go.Scatter(x=df_calc["strike"], y=df_calc["cex"], fill='tozeroy', line_color='#03dac6', name="Net CEX"))
+    fig_cex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
+    fig_cex.update_layout(template="plotly_dark", height=400)
+    st.plotly_chart(fig_cex, use_container_width=True)
+    st.metric("Total Net CEX", fmt_val(net_cex))
+    with st.expander("📝 CEX Outcome & Usage"):
+        st.write("**Outcome:** Shows where Delta is bleeding off due to time. **Usage:** High CEX near your strikes helps OTM options decay to zero faster as expiration approaches.")
 
     # --- DATA TABLE ---
     st.write("---")
-    st.subheader(f"Raw GEX Data: {ticker_input}")
-    st.dataframe(df_table_full.drop(columns=['VEX', 'DEX']), use_container_width=True, hide_index=True)
+    st.subheader(f"Raw Data: {ticker_input}")
+    st.dataframe(df_table_full, use_container_width=True, hide_index=True)
 
     # --- FOOTER ---
     st.write("---")
