@@ -149,19 +149,24 @@ try:
     call_wall = df_calc_all.loc[df_calc_all["gex"].idxmax(), "strike"] if not df_calc_all.empty else 0
     put_wall = df_calc_all.loc[df_calc_all["gex"].idxmin(), "strike"] if not df_calc_all.empty else 0
     
+    # --- GAMMA FLIP CALC ---
+    zero_cross = df_calc_all.iloc[(df_calc_all['gex'] * df_calc_all['gex'].shift(1) < 0).idxmax()]
+    gamma_flip = zero_cross['strike'] if not df_calc_all.empty else 0
+    
     # --- TOP METRICS ---
     regime_val = "POSITIVE" if net_gex >= 0 else "NEGATIVE"
     bg_color = "#d4edda" if net_gex >= 0 else "#f8d7da"
     text_color = "#155724" if net_gex >= 0 else "#721c24"
 
     st.write("---")
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Spot", f"${spot:.2f}")
     m2.metric("Net GEX", fmt_val(net_gex))
-    m3.metric("Call-Wall", f"${call_wall:.2f}")
-    with m4:
+    m3.metric("Flip", f"${gamma_flip:.2f}")
+    m4.metric("Call-Wall", f"${call_wall:.2f}")
+    with m5:
         st.markdown(f'<div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; text-align: center; border: 1px solid {text_color};"><p style="margin:0; font-size:12px; color: #555;">Regime</p><p style="margin:0; font-size:18px; font-weight:bold; color: {text_color};">{regime_val}</p></div>', unsafe_allow_html=True)
-    m5.metric("Put-Wall", f"${put_wall:.2f}")
+    m6.metric("Put-Wall", f"${put_wall:.2f}")
 
     # --- GEX CHART ---
     fig_main = go.Figure()
@@ -169,6 +174,7 @@ try:
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX"))
     fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX"))
     fig_main.add_vline(x=spot, line_width=3, line_color="black", annotation_text="SPOT")
+    fig_main.add_vline(x=gamma_flip, line_width=2, line_color="orange", annotation_text="FLIP")
     fig_main.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_main.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
