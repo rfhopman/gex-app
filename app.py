@@ -16,20 +16,17 @@ st.set_page_config(page_title="GEX, VEX, DEX & CEX Dashboard", page_icon="📊",
 # --- CUSTOM NOTIFICATION LOGIC ---
 NTFY_TOPIC = "GEX_Alerts" 
 
-def send_iphone_notification(ticker, exp, spot, call_w, put_w, alert_type="Update"):
-    if alert_type == "WALL_ALERT":
-        msg = f"⚠️ {ticker} WALL ALERT! Spot ${spot:.2f} is approaching Wall."
-    else:
-        msg = f"🚨 {ticker} ({exp}): Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
+def send_iphone_notification(ticker, exp, spot, call_w, put_w):
+    # Standard message format as requested
+    msg = f"🚨 {ticker} ({exp}): Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
     
     try:
         response = requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}", 
             data=msg.encode('utf-8'),
             headers={
-                "Title": f"Market Alert: {ticker}",
+                "Title": f"Market Update: {ticker}",
                 "Priority": "high",
-                "Tags": "chart_with_upwards_trend,warning"
             },
             timeout=10
         )
@@ -43,7 +40,10 @@ is_weekday = now_est.weekday() <= 4
 start_time = time(14, 0)
 end_time = time(16, 15)
 
-if is_weekday and (start_time <= now_est.time() <= end_time):
+# Strictly enforce the 16:15 cutoff for the auto-refresh and notifications
+is_market_active = is_weekday and (start_time <= now_est.time() <= end_time)
+
+if is_market_active:
     from streamlit_autorefresh import st_autorefresh
     st_autorefresh(interval=15 * 60 * 1000, key="market_close_refresh")
 
@@ -87,6 +87,7 @@ st.title("📊 GEX, VEX, DEX & CEX DASHBOARD")
 with st.sidebar:
     st.write("### Notification Center")
     st.info(f"Topic: {NTFY_TOPIC}")
+    st.write(f"Active Status: {'🟢 Live' if is_market_active else '🔴 Silenced (Post-16:15)'}")
     if st.button("🔔 Send Test Alert"):
         send_iphone_notification("TEST", "2026-04-20", 0.00, 0.00, 0.00)
 
@@ -158,18 +159,21 @@ try:
     call_wall = df_calc_all.loc[df_calc_all["gex"].idxmax(), "strike"] if not df_calc_all.empty else 0
     put_wall = df_calc_all.loc[df_calc_all["gex"].idxmin(), "strike"] if not df_calc_all.empty else 0
     
-    # --- GAMMA FLIP CALC ---
-    zero_cross_g = df_calc_all.iloc[(df_calc_all['gex'] * df_calc_all['gex'].shift(1) < 0).idxmax()] if not df_calc_all.empty else None
-    gamma_flip = zero_cross_g['strike'] if zero_cross_g is not None else 0
+    gamma_flip = 0
+    if not df_calc_all.empty:
+        zero_cross_g = df_calc_all.iloc[(df_calc_all['gex'] * df_calc_all['gex'].shift(1) < 0).idxmax()]
+        gamma_flip = zero_cross_g['strike']
 
-    # --- VANNA FLIP (LIS) CALC ---
-    zero_cross_v = df_calc_all.iloc[(df_calc_all['vex'] * df_calc_all['vex'].shift(1) < 0).idxmax()] if not df_calc_all.empty else None
-    vanna_flip = zero_cross_v['strike'] if zero_cross_v is not None else 0
+    vanna_flip = 0
+    if not df_calc_all.empty:
+        zero_cross_v = df_calc_all.iloc[(df_calc_all['vex'] * df_calc_all['vex'].shift(1) < 0).idxmax()]
+        vanna_flip = zero_cross_v['strike']
 
-    # --- ACTIVE NOTIFICATION TRIGGER ---
-    # Trigger if Spot is within 0.5% of walls
-    if abs(spot - call_wall) / spot < 0.005 or abs(spot - put_wall) / spot < 0.005:
-        send_iphone_notification(ticker_input, selected_exp, spot, call_wall, put_wall, alert_type="WALL_ALERT")
+    # --- ACTIVE NOTIFICATION TRIGGER (WITH TIME CUTOFF) ---
+    if is_market_active:
+        # Trigger regular message if Spot is near walls
+        if abs(spot - call_wall) / spot < 0.005 or abs(spot - put_wall) / spot < 0.005:
+            send_iphone_notification(ticker_input, selected_exp, spot, call_wall, put_wall)
     
     # --- TOP METRICS ---
     regime_val = "POSITIVE" if net_gex >= 0 else "NEGATIVE"
@@ -199,9 +203,6 @@ try:
     fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
     
-    with st.expander("📝 GEX Outcome & Usage"):
-        st.write("**Outcome:** Identifies supply/demand zones. **Usage:** Positive GEX = Range-bound; Negative GEX = Trending.")
-
     # --- GAMMA HEAT MAP ---
     st.write("---")
     st.subheader("Gamma Heat Map")
@@ -251,9 +252,6 @@ try:
     fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_vex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_vex, use_container_width=True)
-    st.metric(f"Total {vex_filter} VEX", fmt_val(df_calc_vex["vex"].sum()))
-    with st.expander("📝 VEX Outcome & Usage"):
-        st.write("**Outcome:** Volatility sensitivity. **Usage:** High VEX spikes help identify strikes that decay rapidly if IV drops.")
 
     # --- DEX SECTION ---
     st.write("---")
@@ -265,13 +263,8 @@ try:
     fig_dex = go.Figure()
     fig_dex.add_trace(go.Bar(x=df_calc_dex["strike"], y=df_calc_dex["dex"], marker_color="#ffa726", name=f"{dex_filter} DEX"))
     fig_dex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
-    fig_dex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
-    fig_dex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_dex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_dex, use_container_width=True)
-    st.metric(f"Total {dex_filter} DEX", fmt_val(df_calc_dex["dex"].sum()))
-    with st.expander("📝 DEX Outcome & Usage"):
-        st.write("**Outcome:** Directional market pressure. **Usage:** Positive DEX = 'Sticky'; Negative DEX = 'Slippery'.")
 
     # --- CEX SECTION (BAR CHART) ---
     st.write("---")
@@ -283,22 +276,44 @@ try:
     fig_cex = go.Figure()
     fig_cex.add_trace(go.Bar(x=df_calc_cex["strike"], y=df_calc_cex["cex"], marker_color='#03dac6', name=f"{cex_filter} CEX"))
     fig_cex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
-    fig_cex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
-    fig_cex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_cex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_cex, use_container_width=True)
-    st.metric(f"Total {cex_filter} CEX", fmt_val(df_calc_cex["cex"].sum()))
-    with st.expander("📝 CEX Outcome & Usage"):
-        st.write("**Outcome:** Shows where Delta is bleeding off due to time. **Usage:** High CEX near strikes accelerates OTM decay.")
 
     # --- DATA TABLE ---
     st.write("---")
     st.subheader(f"Raw Data: {ticker_input}")
     st.dataframe(df_table_full, use_container_width=True, hide_index=True)
 
+    # --- VIX INTRADAY LINE GRAPH ---
+    st.write("---")
+    st.subheader("📉 Today's VIX Intraday (15m Intervals)")
+    try:
+        vix_data = yf.download("^VIX", period="1d", interval="15m")
+        if not vix_data.empty:
+            fig_vix_intra = go.Figure()
+            fig_vix_intra.add_trace(go.Scatter(
+                x=vix_data.index, 
+                y=vix_data['Close'], 
+                mode='lines+markers', 
+                line=dict(color='#ff5252', width=2),
+                name="VIX"
+            ))
+            fig_vix_intra.update_layout(
+                template="plotly_dark", 
+                height=300, 
+                margin=dict(l=10, r=10, t=10, b=10),
+                xaxis_title="Time",
+                yaxis_title="VIX Value"
+            )
+            st.plotly_chart(fig_vix_intra, use_container_width=True)
+        else:
+            st.warning("VIX intraday data currently unavailable.")
+    except Exception as ve:
+        st.error(f"Could not load VIX chart: {ve}")
+
     # --- FOOTER ---
     st.write("---")
-    st.caption(f"Market Time: {market_time} | VIX: {vix_price:.2f} | RF Rate: {risk_free*100:.3f}%")
+    st.caption(f"Market Time: {market_time} | VIX Spot: {vix_price:.2f} | RF Rate: {risk_free*100:.3f}%")
 
 except Exception as e:
     st.error(f"Error: {e}")
