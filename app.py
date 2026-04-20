@@ -202,6 +202,9 @@ try:
     fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
     
+    with st.expander("📝 GEX Outcome & Usage"):
+        st.write("**Outcome:** Identifies supply/demand zones. **Usage:** Positive GEX = Range-bound; Negative GEX = Trending.")
+
     # --- GAMMA HEAT MAP ---
     st.write("---")
     st.subheader("Gamma Heat Map")
@@ -251,6 +254,10 @@ try:
     fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_vex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_vex, use_container_width=True)
+    
+    st.metric(f"Total {vex_filter} VEX", fmt_val(df_calc_vex["vex"].sum()))
+    with st.expander("📝 VEX Outcome & Usage"):
+        st.write("**Outcome:** Volatility sensitivity. **Usage:** High VEX spikes help identify strikes that decay rapidly if IV drops.")
 
     # --- DEX SECTION ---
     st.write("---")
@@ -262,8 +269,14 @@ try:
     fig_dex = go.Figure()
     fig_dex.add_trace(go.Bar(x=df_calc_dex["strike"], y=df_calc_dex["dex"], marker_color="#ffa726", name=f"{dex_filter} DEX"))
     fig_dex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
+    fig_dex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
+    fig_dex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_dex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_dex, use_container_width=True)
+    
+    st.metric(f"Total {dex_filter} DEX", fmt_val(df_calc_dex["dex"].sum()))
+    with st.expander("📝 DEX Outcome & Usage"):
+        st.write("**Outcome:** Directional market pressure. **Usage:** Positive DEX = 'Sticky'; Negative DEX = 'Slippery'.")
 
     # --- CEX SECTION ---
     st.write("---")
@@ -275,8 +288,14 @@ try:
     fig_cex = go.Figure()
     fig_cex.add_trace(go.Bar(x=df_calc_cex["strike"], y=df_calc_cex["cex"], marker_color='#03dac6', name=f"{cex_filter} CEX"))
     fig_cex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
+    fig_cex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
+    fig_cex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_cex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_cex, use_container_width=True)
+    
+    st.metric(f"Total {cex_filter} CEX", fmt_val(df_calc_cex["cex"].sum()))
+    with st.expander("📝 CEX Outcome & Usage"):
+        st.write("**Outcome:** Shows where Delta is bleeding off due to time. **Usage:** High CEX near strikes accelerates OTM decay.")
 
     # --- DATA TABLE ---
     st.write("---")
