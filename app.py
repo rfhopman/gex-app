@@ -1,5 +1,5 @@
 # Upgrade to the 2026 release
-pip install --upgrade yfinance
+!pip install --upgrade yfinance
 
 import streamlit as st
 import math
