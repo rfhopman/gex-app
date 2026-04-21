@@ -81,6 +81,14 @@ def get_market_metrics():
     except: 
         return 0.04, 0.0
 
+@st.cache_data(ttl=900) # 15-minute cache to match interval and prevent rate limits
+def get_vix_intraday():
+    try:
+        vix_raw = yf.download("^VIX", period="1d", interval="15m", progress=False)
+        return vix_raw
+    except:
+        return pd.DataFrame()
+
 # --- TOP ROW CONTROLS ---
 st.title("📊 GEX, VEX, DEX & CEX DASHBOARD")
 
@@ -302,12 +310,11 @@ try:
     st.subheader(f"Raw Data: {ticker_input}")
     st.dataframe(df_table_full, use_container_width=True, hide_index=True)
 
-    # --- VIX INTRADAY LINE GRAPH (TIME FILTER FIX) ---
+    # --- VIX INTRADAY LINE GRAPH (RATE LIMIT FIX) ---
     st.write("---")
     st.subheader("📉 Today's VIX Intraday (15m Intervals)")
     try:
-        # Pull 15m interval data from Yahoo
-        vix_raw = yf.download("^VIX", period="1d", interval="15m")
+        vix_raw = get_vix_intraday()
         if not vix_raw.empty:
             if isinstance(vix_raw.columns, pd.MultiIndex):
                 vix_raw.columns = vix_raw.columns.get_level_values(0)
@@ -335,7 +342,7 @@ try:
             )
             st.plotly_chart(fig_vix_intra, use_container_width=True)
         else:
-            st.warning("No intraday VIX data available.")
+            st.warning("VIX data currently unavailable (API Rate Limited). Try again in a few minutes.")
     except Exception as ve:
         st.error(f"Could not load VIX chart: {ve}")
 
@@ -345,3 +352,4 @@ try:
 
 except Exception as e:
     st.error(f"Error: {e}")
+  
