@@ -1,6 +1,3 @@
-# Check your current version
-pip show yfinance
-
 # Upgrade to the 2026 release
 pip install --upgrade yfinance
 
