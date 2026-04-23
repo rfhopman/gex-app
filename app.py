@@ -16,9 +16,9 @@ st.set_page_config(page_title="GEX, VEX, DEX & CEX Dashboard", page_icon="📊",
 # --- CUSTOM NOTIFICATION LOGIC ---
 NTFY_TOPIC = "GEX_Alerts" 
 
-def send_iphone_notification(ticker, exp, spot, call_w, put_w):
-    # Standard message format
-    msg = f"🚨 {ticker} ({exp}): Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
+def send_iphone_notification(ticker, exp, spot, call_w, put_w, regime):
+    # Added regime to the notification message
+    msg = f"🚨 {ticker} ({exp}): {regime} | Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
     
     try:
         response = requests.post(
