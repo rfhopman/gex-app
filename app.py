@@ -89,7 +89,8 @@ with st.sidebar:
     st.info(f"Topic: {NTFY_TOPIC}")
     st.write(f"Active Status: {'🟢 Live' if is_market_active else '🔴 Silenced (Post-16:15)'}")
     if st.button("🔔 Send Test Alert"):
-        send_iphone_notification("TEST", "2026-04-20", 0.00, 0.00, 0.00)
+        # Added "TEST_REGIME" as the 6th argument to match the new function signature
+        send_iphone_notification("TEST", "2026-04-20", 0.00, 0.00, 0.00, "TEST_REGIME")
 
 ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([1, 1.5, 1, 0.5])
 
