@@ -16,9 +16,9 @@ st.set_page_config(page_title="GEX, VEX, DEX & CEX Dashboard", page_icon="📊",
 # --- CUSTOM NOTIFICATION LOGIC ---
 NTFY_TOPIC = "GEX_Alerts" 
 
-def send_iphone_notification(ticker, exp, spot, call_w, put_w, regime):
-    # Added regime to the notification message
-    msg = f"🚨 {ticker} ({exp}): {regime} | Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
+def send_iphone_notification(ticker, exp, spot, call_w, put_w):
+    # Standard message format
+    msg = f"🚨 {ticker} ({exp}): Spot ${spot:.2f} | CW ${call_w:.2f} | PW ${put_w:.2f}"
     
     try:
         response = requests.post(
@@ -89,8 +89,7 @@ with st.sidebar:
     st.info(f"Topic: {NTFY_TOPIC}")
     st.write(f"Active Status: {'🟢 Live' if is_market_active else '🔴 Silenced (Post-16:15)'}")
     if st.button("🔔 Send Test Alert"):
-        # Added "TEST_REGIME" as the 6th argument to match the new function signature
-        send_iphone_notification("TEST", "2026-04-20", 0.00, 0.00, 0.00, "TEST_REGIME")
+        send_iphone_notification("TEST", "2026-04-20", 0.00, 0.00, 0.00)
 
 ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([1, 1.5, 1, 0.5])
 
