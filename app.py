@@ -38,16 +38,16 @@ def send_iphone_notification(ticker, exp, spot, call_w, put_w):
 now_est = datetime.now(ZoneInfo("America/New_York"))
 is_weekday = now_est.weekday() <= 4  
 start_time = time(14, 0)
+# Strictly enforce the 16:15 cutoff
 end_time = time(16, 15)
 
-# Strictly enforce the 16:15 cutoff for the auto-refresh and notifications
 is_market_active = is_weekday and (start_time <= now_est.time() <= end_time)
 
 if is_market_active:
     from streamlit_autorefresh import st_autorefresh
     st_autorefresh(interval=15 * 60 * 1000, key="market_close_refresh")
 
-# --- Helpers ---
+# --- Helpers (Logic exactly as provided) ---
 def bs_greeks(S, K, T, r, iv, opt_type="Call"):
     if T <= 0 or iv <= 0 or S <= 0 or K <= 0: return 0.0, 0.0, 0.0, 0.0
     d1 = (math.log(S/K) + (r + 0.5*iv*iv)*T) / (iv*math.sqrt(T))
@@ -120,39 +120,61 @@ try:
         st.error("No options found.")
         st.stop()
 
-    selected_exp = st.selectbox("Select Expiration Date", all_exps)
+    # --- MULTI-EXPIRATION SELECTION ---
+    st.sidebar.write("---")
+    st.sidebar.write("### Select Expirations (Max 5)")
+    available_exps = all_exps[:10]
+    selected_exps = []
+
+    exp_col1, exp_col2 = st.sidebar.columns(2)
+    for i, exp in enumerate(available_exps):
+        target_col = exp_col1 if i % 2 == 0 else exp_col2
+        if target_col.checkbox(exp, value=(i == 0), key=f"exp_{exp}"):
+            selected_exps.append(exp)
+
+    if len(selected_exps) > 5:
+        st.sidebar.warning("⚠️ Only first 5 selected will be processed.")
+        selected_exps = selected_exps[:5]
+
+    if not selected_exps:
+        st.error("Please select at least one expiration date.")
+        st.stop()
 
     # --- DATA PROCESSING ---
     risk_free, vix_price = get_market_metrics()
     now_ts = datetime.now(timezone.utc).timestamp()
-    exp_ts = datetime.strptime(selected_exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
-    T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
     
-    chain = tk.option_chain(selected_exp)
     main_list, table_rows = [], []
     
-    for opt_type, df_raw in [("Call", chain.calls), ("Put", chain.puts)]:
-        df = df_raw.copy()
-        for col in ["strike", "openInterest", "volume", "impliedVolatility"]:
-            if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    # Loop through each selected expiration and aggregate
+    for exp_date in selected_exps:
+        exp_ts = datetime.strptime(exp_date, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
+        T_main = max((exp_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
+        
+        chain = tk.option_chain(exp_date)
+        
+        for opt_type, df_raw in [("Call", chain.calls), ("Put", chain.puts)]:
+            df = df_raw.copy()
+            for col in ["strike", "openInterest", "volume", "impliedVolatility"]:
+                if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-        for _, row in df.iterrows():
-            K, OI, iv, vol = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"]), float(row["volume"])
-            if iv <= 0 or K <= 0: continue
-            
-            gamma, vega, delta, charm = bs_greeks(spot, K, T_main, risk_free, iv, opt_type)
-            gex = gamma * OI * 100 * spot * spot * 0.01
-            vex = vega * OI * 100 
-            dex = delta * OI * 100 * spot 
-            cex = charm * OI * 100 * spot 
-            
-            if spot * 0.8 <= K <= spot * 1.2:
-                main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "vex": vex, "dex": dex, "cex": cex, "type": opt_type, "oi": OI, "vol": vol})
-            
-            table_rows.append({"Strike": K, "Type": opt_type, "OI": int(OI), "Volume": int(vol), "IV": f"{iv*100:.2f}%", "GEX": gex if opt_type == "Call" else -gex, "VEX": vex, "DEX": dex, "CEX": cex})
+            for _, row in df.iterrows():
+                K, OI, iv, vol = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"]), float(row["volume"])
+                if iv <= 0 or K <= 0: continue
+                
+                gamma, vega, delta, charm = bs_greeks(spot, K, T_main, risk_free, iv, opt_type)
+                gex = gamma * OI * 100 * spot * spot * 0.01
+                vex = vega * OI * 100 
+                dex = delta * OI * 100 * spot 
+                cex = charm * OI * 100 * spot 
+                
+                if spot * 0.8 <= K <= spot * 1.2:
+                    main_list.append({"strike": K, "gex": gex if opt_type == "Call" else -gex, "vex": vex, "dex": dex, "cex": cex, "type": opt_type, "oi": OI, "vol": vol})
+                
+                table_rows.append({"Exp": exp_date, "Strike": K, "Type": opt_type, "OI": int(OI), "Volume": int(vol), "IV": f"{iv*100:.2f}%", "GEX": gex if opt_type == "Call" else -gex, "VEX": vex, "DEX": dex, "CEX": cex})
 
     df_main = pd.DataFrame(main_list)
-    df_table_full = pd.DataFrame(table_rows).sort_values(["Strike", "Type"])
+    df_table_full = pd.DataFrame(table_rows).sort_values(["Exp", "Strike", "Type"])
     
     df_calc_all = df_main.groupby("strike").agg({'gex': 'sum', 'vex': 'sum', 'dex': 'sum', 'cex': 'sum'}).reset_index().sort_values("strike")
     net_gex = df_calc_all["gex"].sum() if not df_calc_all.empty else 0
@@ -161,18 +183,23 @@ try:
     
     gamma_flip = 0
     if not df_calc_all.empty:
-        zero_cross_g = df_calc_all.iloc[(df_calc_all['gex'] * df_calc_all['gex'].shift(1) < 0).idxmax()]
-        gamma_flip = zero_cross_g['strike']
+        try:
+            zero_cross_g = df_calc_all.iloc[(df_calc_all['gex'] * df_calc_all['gex'].shift(1) < 0).idxmax()]
+            gamma_flip = zero_cross_g['strike']
+        except: gamma_flip = 0
 
     vanna_flip = 0
     if not df_calc_all.empty:
-        zero_cross_v = df_calc_all.iloc[(df_calc_all['vex'] * df_calc_all['vex'].shift(1) < 0).idxmax()]
-        vanna_flip = zero_cross_v['strike']
+        try:
+            zero_cross_v = df_calc_all.iloc[(df_calc_all['vex'] * df_calc_all['vex'].shift(1) < 0).idxmax()]
+            vanna_flip = zero_cross_v['strike']
+        except: vanna_flip = 0
 
     # --- ACTIVE NOTIFICATION TRIGGER ---
     if is_market_active:
         if abs(spot - call_wall) / spot < 0.005 or abs(spot - put_wall) / spot < 0.005:
-            send_iphone_notification(ticker_input, selected_exp, spot, call_wall, put_wall)
+            # Using the first selected exp as label for notification
+            send_iphone_notification(ticker_input, selected_exps[0], spot, call_wall, put_wall)
     
     # --- TOP METRICS ---
     regime_val = "POSITIVE" if net_gex >= 0 else "NEGATIVE"
@@ -190,30 +217,29 @@ try:
         st.markdown(f'<div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; text-align: center; border: 1px solid {text_color};"><p style="margin:0; font-size:12px; color: #555;">Regime</p><p style="margin:0; font-size:18px; font-weight:bold; color: {text_color};">{regime_val}</p></div>', unsafe_allow_html=True)
     m7.metric("Put-Wall", f"${put_wall:.2f}")
 
-    # --- GEX CHART ---
+    # --- GEX CHART (Aggregated) ---
     fig_main = go.Figure()
     df_visual = df_main[df_main['oi'] >= min_oi_visual]
-    fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Call']["strike"], y=df_visual[df_visual['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX"))
-    fig_main.add_trace(go.Bar(x=df_visual[df_visual['type'] == 'Put']["strike"], y=df_visual[df_visual['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX"))
+    # Re-group by strike for chart so same strikes on different dates don't create multiple bars
+    df_chart = df_visual.groupby(["strike", "type"]).agg({"gex": "sum"}).reset_index()
+    
+    fig_main.add_trace(go.Bar(x=df_chart[df_chart['type'] == 'Call']["strike"], y=df_chart[df_chart['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX"))
+    fig_main.add_trace(go.Bar(x=df_chart[df_chart['type'] == 'Put']["strike"], y=df_chart[df_chart['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX"))
     fig_main.add_vline(x=spot, line_width=3, line_color="black", annotation_text="SPOT")
     fig_main.add_vline(x=gamma_flip, line_width=2, line_color="orange", annotation_text="G-FLIP")
     fig_main.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_main.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
-    fig_main.update_layout(title="Gamma Exposure (GEX)", template="plotly_dark", height=400, barmode='relative')
+    fig_main.update_layout(title=f"Gamma Exposure (Aggregated): {', '.join(selected_exps)}", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
     
-    with st.expander("📝 GEX Outcome & Usage"):
-        st.write("**Outcome:** Identifies supply/demand zones. **Usage:** Positive GEX = Range-bound; Negative GEX = Trending.")
-
     # --- GAMMA HEAT MAP ---
     st.write("---")
-    st.subheader("Gamma Heat Map")
+    st.subheader("Gamma Heat Map (Selected Dates)")
     heat_filter = st.radio("Heat Map Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="heat_filter")
 
     with st.spinner("Generating Gamma Heat Map..."):
-        heatmap_exps = all_exps[:10]
         heatmap_list = []
-        for exp in heatmap_exps:
+        for exp in selected_exps:
             e_ts = datetime.strptime(exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
             T_heat = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
             try:
@@ -239,7 +265,7 @@ try:
             fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_heat, use_container_width=True)
 
-    # --- VEX SECTION ---
+    # --- VEX SECTION (Aggregated) ---
     st.write("---")
     st.header("📉 VEX PROFILE (Volatility Exposure)")
     vex_filter = st.radio("VEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="vex_filter")
@@ -250,16 +276,10 @@ try:
     fig_vex.add_trace(go.Bar(x=df_calc_vex["strike"], y=df_calc_vex["vex"], marker_color='#bb86fc', name=f"{vex_filter} VEX"))
     fig_vex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_vex.add_vline(x=vanna_flip, line_width=2, line_color="yellow", annotation_text="LIS")
-    fig_vex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
-    fig_vex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_vex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_vex, use_container_width=True)
     
-    st.metric(f"Total {vex_filter} VEX", fmt_val(df_calc_vex["vex"].sum()))
-    with st.expander("📝 VEX Outcome & Usage"):
-        st.write("**Outcome:** Volatility sensitivity. **Usage:** High VEX spikes help identify strikes that decay rapidly if IV drops.")
-
-    # --- DEX SECTION ---
+    # --- DEX SECTION (Aggregated) ---
     st.write("---")
     st.header("🎯 DEX PROFILE (Delta Exposure)")
     dex_filter = st.radio("DEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="dex_filter")
@@ -269,16 +289,10 @@ try:
     fig_dex = go.Figure()
     fig_dex.add_trace(go.Bar(x=df_calc_dex["strike"], y=df_calc_dex["dex"], marker_color="#ffa726", name=f"{dex_filter} DEX"))
     fig_dex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
-    fig_dex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
-    fig_dex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_dex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_dex, use_container_width=True)
-    
-    st.metric(f"Total {dex_filter} DEX", fmt_val(df_calc_dex["dex"].sum()))
-    with st.expander("📝 DEX Outcome & Usage"):
-        st.write("**Outcome:** Directional market pressure. **Usage:** Positive DEX = 'Sticky'; Negative DEX = 'Slippery'.")
 
-    # --- CEX SECTION ---
+    # --- CEX SECTION (Aggregated) ---
     st.write("---")
     st.header("⏳ CEX PROFILE (Charm/Delta Decay)")
     cex_filter = st.radio("CEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="cex_filter")
@@ -288,56 +302,31 @@ try:
     fig_cex = go.Figure()
     fig_cex.add_trace(go.Bar(x=df_calc_cex["strike"], y=df_calc_cex["cex"], marker_color='#03dac6', name=f"{cex_filter} CEX"))
     fig_cex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
-    fig_cex.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
-    fig_cex.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_cex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_cex, use_container_width=True)
-    
-    st.metric(f"Total {cex_filter} CEX", fmt_val(df_calc_cex["cex"].sum()))
-    with st.expander("📝 CEX Outcome & Usage"):
-        st.write("**Outcome:** Shows where Delta is bleeding off due to time. **Usage:** High CEX near strikes accelerates OTM decay.")
 
     # --- DATA TABLE ---
     st.write("---")
-    st.subheader(f"Raw Data: {ticker_input}")
+    st.subheader(f"Raw Data: {ticker_input} (Aggregated)")
     st.dataframe(df_table_full, use_container_width=True, hide_index=True)
 
-    # --- VIX INTRADAY LINE GRAPH (TIME FILTER FIX) ---
+    # --- VIX INTRADAY LINE GRAPH ---
     st.write("---")
     st.subheader("📉 Today's VIX Intraday (15m Intervals)")
     try:
-        # Pull 15m interval data from Yahoo
         vix_raw = yf.download("^VIX", period="1d", interval="15m")
         if not vix_raw.empty:
             if isinstance(vix_raw.columns, pd.MultiIndex):
                 vix_raw.columns = vix_raw.columns.get_level_values(0)
-            
-            # Ensure index is in NY time
             vix_raw.index = vix_raw.index.tz_convert(ZoneInfo("America/New_York"))
-            
-            # Filter for standard market hours (9:30 AM to 4:15 PM)
             vix_raw = vix_raw.between_time("09:30", "16:15")
             
             fig_vix_intra = go.Figure()
-            fig_vix_intra.add_trace(go.Scatter(
-                x=vix_raw.index, 
-                y=vix_raw['Close'], 
-                mode='lines+markers', 
-                line=dict(color='#ff5252', width=2),
-                name="VIX"
-            ))
-            fig_vix_intra.update_layout(
-                template="plotly_dark", 
-                height=350, 
-                margin=dict(l=10, r=10, t=10, b=10),
-                xaxis_title="NY Time",
-                yaxis_title="VIX Value"
-            )
+            fig_vix_intra.add_trace(go.Scatter(x=vix_raw.index, y=vix_raw['Close'], mode='lines+markers', line=dict(color='#ff5252', width=2), name="VIX"))
+            fig_vix_intra.update_layout(template="plotly_dark", height=350, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="NY Time", yaxis_title="VIX Value")
             st.plotly_chart(fig_vix_intra, use_container_width=True)
-        else:
-            st.warning("No intraday VIX data available.")
-    except Exception as ve:
-        st.error(f"Could not load VIX chart: {ve}")
+        else: st.warning("No intraday VIX data available.")
+    except Exception as ve: st.error(f"Could not load VIX chart: {ve}")
 
     # --- FOOTER ---
     st.write("---")
@@ -345,4 +334,3 @@ try:
 
 except Exception as e:
     st.error(f"Error: {e}")
-  
