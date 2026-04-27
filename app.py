@@ -232,50 +232,56 @@ try:
     fig_main.update_layout(title=f"Gamma Exposure (Aggregated): {', '.join(selected_exps)}", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
 
-    # --- NET & ABS GEX BY EXPIRATION ---
+    # --- NET & ABS GEX BY STRIKE ---
     st.write("---")
-    st.subheader("Total GEX by Expiration")
+    st.subheader(f"Net vs. Absolute GEX by Strike ({ticker_input})")
     
-    # Calculate Net and Absolute GEX for each selected expiration
-    df_exp_agg = df_table_full.groupby("Exp").agg({
+    # Aggregate Net and Absolute GEX by Strike price across all selected expirations
+    # We use df_table_full to ensure we have access to the raw GEX values
+    df_strike_agg = df_table_full.groupby("Strike").agg({
         "GEX": [
             ("Net GEX", "sum"),
             ("Abs GEX", lambda x: x.abs().sum())
         ]
     })
-    # Flatten multi-index columns
-    df_exp_agg.columns = [col[1] for col in df_exp_agg.columns]
-    df_exp_agg = df_exp_agg.reset_index()
+    
+    # Flatten the multi-index columns created by agg
+    df_strike_agg.columns = [col[1] for col in df_strike_agg.columns]
+    df_strike_agg = df_strike_agg.reset_index()
 
-    fig_exp_bars = go.Figure()
+    fig_strike_bars = go.Figure()
 
-    # Add Bar for Net GEX
-    fig_exp_bars.add_trace(go.Bar(
-        x=df_exp_agg["Exp"],
-        y=df_exp_agg["Net GEX"],
+    # Add Bar for Absolute GEX (Visualized as a background 'shadow')
+    fig_strike_bars.add_trace(go.Bar(
+        x=df_strike_agg["Strike"],
+        y=df_strike_agg["Abs GEX"],
+        name="Absolute GEX",
+        marker_color="#bb86fc",
+        opacity=0.4  # Semi-transparent to make Net GEX stand out
+    ))
+
+    # Add Bar for Net GEX (The directional exposure)
+    fig_strike_bars.add_trace(go.Bar(
+        x=df_strike_agg["Strike"],
+        y=df_strike_agg["Net GEX"],
         name="Net GEX",
         marker_color="#4db6ac"
     ))
 
-    # Add Bar for Absolute GEX
-    fig_exp_bars.add_trace(go.Bar(
-        x=df_exp_agg["Exp"],
-        y=df_exp_agg["Abs GEX"],
-        name="Absolute GEX",
-        marker_color="#bb86fc",
-        opacity=0.7
-    ))
-
-    fig_exp_bars.update_layout(
-        title=f"Net vs. Absolute Gamma Exposure per Expiration ({ticker_input})",
+    fig_strike_bars.update_layout(
+        title=f"Net vs. Absolute Gamma Exposure per Strike (Aggregated Expirations)",
         template="plotly_dark",
-        barmode='group',
-        height=400,
-        xaxis_title="Expiration Date",
-        yaxis_title="GEX Value ($)"
+        barmode='overlay',  # Overlays Net GEX on top of Absolute GEX
+        height=450,
+        xaxis_title="Strike Price",
+        yaxis_title="GEX Value ($)",
+        hovermode="x unified"
     )
 
-    st.plotly_chart(fig_exp_bars, use_container_width=True)
+    # Add a vertical line for the current Spot price
+    fig_strike_bars.add_vline(x=spot, line_width=2, line_color="white", line_dash="dash", annotation_text="SPOT")
+
+    st.plotly_chart(fig_strike_bars, use_container_width=True)
     
     # --- GAMMA HEAT MAP ---
     st.write("---")
