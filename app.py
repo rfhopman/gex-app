@@ -219,45 +219,17 @@ try:
 
     # --- GEX CHART (Aggregated) ---
     fig_main = go.Figure()
-    # Create a copy to calculate absolute values without affecting the original dataframe
-    df_visual = df_main[df_main['oi'] >= min_oi_visual].copy()
-    df_visual['abs_gex'] = df_visual['gex'].abs()
-
-    # Re-group by strike only to get Net and Absolute totals per price level
-    df_chart = df_visual.groupby("strike").agg({
-        "gex": "sum",      # This is Net GEX
-        "abs_gex": "sum"   # This is Absolute GEX
-    }).reset_index()
+    df_visual = df_main[df_main['oi'] >= min_oi_visual]
+    # Re-group by strike for chart so same strikes on different dates don't create multiple bars
+    df_chart = df_visual.groupby(["strike", "type"]).agg({"gex": "sum"}).reset_index()
     
-    # Add Absolute GEX (Visualized as a background/outer bar)
-    fig_main.add_trace(go.Bar(
-        x=df_chart["strike"], 
-        y=df_chart["abs_gex"], 
-        marker_color="#bb86fc", 
-        name="Absolute GEX",
-        opacity=0.4  # Made semi-transparent so Net GEX is visible
-    ))
-
-    # Add Net GEX (The directional exposure)
-    fig_main.add_trace(go.Bar(
-        x=df_chart["strike"], 
-        y=df_chart["gex"], 
-        marker_color="#4db6ac", 
-        name="Net GEX"
-    ))
-
+    fig_main.add_trace(go.Bar(x=df_chart[df_chart['type'] == 'Call']["strike"], y=df_chart[df_chart['type'] == 'Call']["gex"], marker_color="#4db6ac", name="Call GEX"))
+    fig_main.add_trace(go.Bar(x=df_chart[df_chart['type'] == 'Put']["strike"], y=df_chart[df_chart['type'] == 'Put']["gex"], marker_color="#e57373", name="Put GEX"))
     fig_main.add_vline(x=spot, line_width=3, line_color="black", annotation_text="SPOT")
     fig_main.add_vline(x=gamma_flip, line_width=2, line_color="orange", annotation_text="G-FLIP")
     fig_main.add_vline(x=call_wall, line_width=2, line_color="#4db6ac", annotation_text="CW")
     fig_main.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
-    
-    # Change barmode to 'overlay' to see Net inside/over Absolute
-    fig_main.update_layout(
-        title=f"Net vs. Absolute GEX by Strike: {', '.join(selected_exps)}", 
-        template="plotly_dark", 
-        height=400, 
-        barmode='overlay' 
-    )
+    fig_main.update_layout(title=f"Gamma Exposure (Aggregated): {', '.join(selected_exps)}", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
 
     # --- NET & ABS GEX BY EXPIRATION ---
