@@ -231,6 +231,51 @@ try:
     fig_main.add_vline(x=put_wall, line_width=2, line_color="#e57373", annotation_text="PW")
     fig_main.update_layout(title=f"Gamma Exposure (Aggregated): {', '.join(selected_exps)}", template="plotly_dark", height=400, barmode='relative')
     st.plotly_chart(fig_main, use_container_width=True)
+
+    # --- NET & ABS GEX BY EXPIRATION ---
+    st.write("---")
+    st.subheader("Total GEX by Expiration")
+    
+    # Calculate Net and Absolute GEX for each selected expiration
+    df_exp_agg = df_table_full.groupby("Exp").agg({
+        "GEX": [
+            ("Net GEX", "sum"),
+            ("Abs GEX", lambda x: x.abs().sum())
+        ]
+    })
+    # Flatten multi-index columns
+    df_exp_agg.columns = [col[1] for col in df_exp_agg.columns]
+    df_exp_agg = df_exp_agg.reset_index()
+
+    fig_exp_bars = go.Figure()
+
+    # Add Bar for Net GEX
+    fig_exp_bars.add_trace(go.Bar(
+        x=df_exp_agg["Exp"],
+        y=df_exp_agg["Net GEX"],
+        name="Net GEX",
+        marker_color="#4db6ac"
+    ))
+
+    # Add Bar for Absolute GEX
+    fig_exp_bars.add_trace(go.Bar(
+        x=df_exp_agg["Exp"],
+        y=df_exp_agg["Abs GEX"],
+        name="Absolute GEX",
+        marker_color="#bb86fc",
+        opacity=0.7
+    ))
+
+    fig_exp_bars.update_layout(
+        title=f"Net vs. Absolute Gamma Exposure per Expiration ({ticker_input})",
+        template="plotly_dark",
+        barmode='group',
+        height=400,
+        xaxis_title="Expiration Date",
+        yaxis_title="GEX Value ($)"
+    )
+
+    st.plotly_chart(fig_exp_bars, use_container_width=True)
     
     # --- GAMMA HEAT MAP ---
     st.write("---")
