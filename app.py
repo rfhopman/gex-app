@@ -279,7 +279,7 @@ try:
     )
 
     # Add a vertical line for the current Spot price
-    fig_strike_bars.add_vline(x=spot, line_width=2, line_color="white", line_dash="dash", annotation_text="SPOT")
+    fig_strike_bars.add_vline(x=spot, line_width=2, line_color="black", line_dash="solid", annotation_text="SPOT")
 
     st.plotly_chart(fig_strike_bars, use_container_width=True)
     
