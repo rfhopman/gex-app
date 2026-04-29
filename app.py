@@ -284,18 +284,22 @@ try:
     st.plotly_chart(fig_strike_bars, use_container_width=True)
     
     # --- GAMMA HEAT MAP ---
-    # --- UPDATED HEAT MAP LOGIC ---
     st.write("---")
     st.subheader("Gamma Heat Map (Selected + Next 4 Expirations)")
     heat_filter = st.radio("Heat Map Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="heat_filter")
 
     with st.spinner("Generating Gamma Heat Map..."):
-        # 1. Identify the range: Selected dates + next 4 available
+        # Identify the range: Selected dates + next 4 available
         if selected_exps:
             last_selected_date = selected_exps[-1]
-            last_idx = all_exps.index(last_selected_date)
-            # Create a combined list: all selected plus the 4 dates following the last selection
-            heat_map_dates = list(dict.fromkeys(selected_exps + all_exps[last_idx + 1 : last_idx + 5]))
+            try:
+                last_idx = all_exps.index(last_selected_date)
+                # FIX: Ensure we are adding two LISTS together. 
+                # We wrap the slice in list() to be safe, though a slice of a list is naturally a list.
+                next_four = list(all_exps[last_idx + 1 : last_idx + 5])
+                heat_map_dates = list(dict.fromkeys(selected_exps + next_four))
+            except (ValueError, IndexError):
+                heat_map_dates = selected_exps
         else:
             heat_map_dates = all_exps[:5]
 
