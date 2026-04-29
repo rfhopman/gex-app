@@ -284,13 +284,23 @@ try:
     st.plotly_chart(fig_strike_bars, use_container_width=True)
     
     # --- GAMMA HEAT MAP ---
+    # --- UPDATED HEAT MAP LOGIC ---
     st.write("---")
-    st.subheader("Gamma Heat Map (Selected Dates)")
+    st.subheader("Gamma Heat Map (Selected + Next 4 Expirations)")
     heat_filter = st.radio("Heat Map Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="heat_filter")
 
     with st.spinner("Generating Gamma Heat Map..."):
+        # 1. Identify the range: Selected dates + next 4 available
+        if selected_exps:
+            last_selected_date = selected_exps[-1]
+            last_idx = all_exps.index(last_selected_date)
+            # Create a combined list: all selected plus the 4 dates following the last selection
+            heat_map_dates = list(dict.fromkeys(selected_exps + all_exps[last_idx + 1 : last_idx + 5]))
+        else:
+            heat_map_dates = all_exps[:5]
+
         heatmap_list = []
-        for exp in selected_exps:
+        for exp in heat_map_dates:
             e_ts = datetime.strptime(exp, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc).timestamp()
             T_heat = max((e_ts - now_ts) / (365.25 * 24 * 3600), 0.5/365.25)
             try:
@@ -298,13 +308,19 @@ try:
                 for o_type, df_h_raw in [("Call", c.calls), ("Put", c.puts)]:
                     if heat_filter != "All" and o_type != heat_filter: continue
                     df_h = df_h_raw.copy()
+                    # Keep strikes within 10% of spot for the heatmap
                     df_h_plot = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
                     for _, row in df_h_plot.iterrows():
                         K_h, OI_h, iv_h = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"])
                         if iv_h <= 0: continue
+                        # Use existing bs_greeks logic
                         g, _, _, _ = bs_greeks(spot, K_h, T_heat, risk_free, iv_h, o_type)
                         gex_h = g * OI_h * 100 * spot * spot * 0.01
-                        heatmap_list.append({"expiry": exp, "strike": K_h, "netGEX": gex_h if o_type == "Call" else -gex_h})
+                        heatmap_list.append({
+                            "expiry": exp, 
+                            "strike": K_h, 
+                            "netGEX": gex_h if o_type == "Call" else -gex_h
+                        })
             except: continue
         
         if heatmap_list:
