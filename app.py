@@ -349,13 +349,17 @@ try:
             )
             
             # Optional: Add a text label for the Spot line
-            fig_heat.add_annotation(
+                        fig_heat.add_annotation(
                 x=spot,
                 y=1.02,
                 yref="paper",
-                text="SPOT",
+                text="<b>SPOT</b>",  # Use HTML tags for boldness
                 showarrow=False,
-                font=dict(color="black", size=12, bold=True)
+                font=dict(
+                    color="black", 
+                    size=12
+                    # removed 'bold': True
+                )
             )
 
             fig_heat.update_layout(
