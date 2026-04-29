@@ -349,7 +349,7 @@ try:
             )
             
             # Optional: Add a text label for the Spot line
-                        fig_heat.add_annotation(
+            fig_heat.add_annotation(
                 x=spot,
                 y=1.02,
                 yref="paper",
@@ -357,9 +357,7 @@ try:
                 showarrow=False,
                 font=dict(
                     color="black", 
-                    size=12
-                    # removed 'bold': True
-                )
+                    size=12)
             )
 
             fig_heat.update_layout(
