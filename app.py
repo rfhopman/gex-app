@@ -323,14 +323,7 @@ try:
                         })
             except: continue
         
-        if heatmap_list:
-            df_heat_long = pd.DataFrame(heatmap_list)
-            df_pivot = df_heat_long.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
-            custom_rdwgn = [[0.0, "rgb(215,48,39)"], [0.45, "rgb(254,224,139)"], [0.5, "rgb(255,255,255)"], [0.55, "rgb(166,217,106)"], [1.0, "rgb(26,152,80)"]]
-            fig_heat = go.Figure(data=go.Heatmap(z=df_pivot.values, x=df_pivot.columns, y=df_pivot.index, colorscale=custom_rdwgn, zmid=0, hovertemplate="<b>Exp:</b> %{y}<br><b>Strike:</b> %{x}<br><b>GEX:</b> %{z:,.0f}<extra></extra>"))
-            fig_heat.add_vline(x=spot, line_width=4, line_color="black", annotation_text="SPOT")
-            fig_heat.update_layout(template="plotly_white", height=500, margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(fig_heat, use_container_width=True)
+        
 
     # --- VEX SECTION (Aggregated) ---
     st.write("---")
