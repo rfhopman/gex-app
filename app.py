@@ -324,7 +324,7 @@ try:
                         })
             except: continue
 
-        # --- RENDER THE CHART ---
+       # --- RENDER THE CHART ---
         if heatmap_list:
             df_heat = pd.DataFrame(heatmap_list)
             # Aggregate by expiry and strike
@@ -339,6 +339,25 @@ try:
                 hovertemplate="Expiry: %{y}<br>Strike: %{x}<br>Net GEX: %{z:,.0f}<extra></extra>"
             ))
             
+            # ADD THIS SECTION TO RESTORE THE SPOT LINE
+            fig_heat.add_shape(
+                type="line",
+                x0=spot, x1=spot,
+                y0=0, y1=1,
+                yref="paper",  # This ensures the line spans the full height of the chart
+                line=dict(color="black", width=3, dash="solid")
+            )
+            
+            # Optional: Add a text label for the Spot line
+            fig_heat.add_annotation(
+                x=spot,
+                y=1.02,
+                yref="paper",
+                text="SPOT",
+                showarrow=False,
+                font=dict(color="black", size=12, bold=True)
+            )
+
             fig_heat.update_layout(
                 title="Gamma Concentration by Expiry & Strike",
                 xaxis_title="Strike Price",
@@ -347,8 +366,6 @@ try:
                 height=500
             )
             st.plotly_chart(fig_heat, use_container_width=True)
-        else:
-            st.info("No data available for the Heat Map range.")
         
         
 
