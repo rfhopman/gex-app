@@ -372,8 +372,15 @@ try:
         
 
     # --- VEX SECTION (Aggregated) ---
+    # --- VEX SECTION (Aggregated) ---
     st.write("---")
     st.header("📉 VEX PROFILE (Volatility Exposure)")
+    
+    # Calculate and display Total VEX
+    total_vex = df_main['vex'].sum()
+    st.write(f"**Total Portfolio VEX:** {fmt_val(total_vex)}")
+    st.info("VEX (Vega Exposure) measures the portfolio's sensitivity to changes in Implied Volatility. Positive VEX profits from rising IV (Long Vol), while Negative VEX profits from IV crush (Short Vol).")
+
     vex_filter = st.radio("VEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="vex_filter")
     df_vex_plot = df_main if vex_filter == "All" else df_main[df_main['type'] == vex_filter]
     df_calc_vex = df_vex_plot.groupby("strike").agg({'vex': 'sum'}).reset_index().sort_values("strike")
@@ -386,8 +393,15 @@ try:
     st.plotly_chart(fig_vex, use_container_width=True)
     
     # --- DEX SECTION (Aggregated) ---
+    # --- DEX SECTION (Aggregated) ---
     st.write("---")
     st.header("🎯 DEX PROFILE (Delta Exposure)")
+    
+    # Calculate and display Total DEX
+    total_dex = df_main['dex'].sum()
+    st.write(f"**Total Portfolio DEX:** {fmt_val(total_dex)}")
+    st.info("DEX (Delta Exposure) represents the dollar value change in the portfolio for a 1% move in the underlying price. It shows the directional bias of the market makers.")
+
     dex_filter = st.radio("DEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="dex_filter")
     df_dex_plot = df_main if dex_filter == "All" else df_main[df_main['type'] == dex_filter]
     df_calc_dex = df_dex_plot.groupby("strike").agg({'dex': 'sum'}).reset_index().sort_values("strike")
@@ -399,8 +413,15 @@ try:
     st.plotly_chart(fig_dex, use_container_width=True)
 
     # --- CEX SECTION (Aggregated) ---
+    # --- CEX SECTION (Aggregated) ---
     st.write("---")
     st.header("⏳ CEX PROFILE (Charm/Delta Decay)")
+    
+    # Calculate and display Total CEX
+    total_cex = df_main['cex'].sum()
+    st.write(f"**Total Portfolio CEX:** {fmt_val(total_cex)}")
+    st.info("CEX (Charm Exposure) measures how Delta decays as time passes (Theta for Delta). It helps predict how dealer hedging requirements might change overnight or as expiration approaches.")
+
     cex_filter = st.radio("CEX Filter", options=["All", "Call", "Put"], index=0, horizontal=True, key="cex_filter")
     df_cex_plot = df_main if cex_filter == "All" else df_main[df_main['type'] == cex_filter]
     df_calc_cex = df_cex_plot.groupby("strike").agg({'cex': 'sum'}).reset_index().sort_values("strike")
@@ -410,7 +431,6 @@ try:
     fig_cex.add_vline(x=spot, line_width=2, line_color="black", annotation_text="SPOT")
     fig_cex.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_cex, use_container_width=True)
-
     # --- DATA TABLE ---
     st.write("---")
     st.subheader(f"Raw Data: {ticker_input} (Aggregated)")
