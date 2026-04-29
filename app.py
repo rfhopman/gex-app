@@ -294,8 +294,6 @@ try:
             last_selected_date = selected_exps[-1]
             try:
                 last_idx = all_exps.index(last_selected_date)
-                # FIX: Ensure we are adding two LISTS together. 
-                # We wrap the slice in list() to be safe, though a slice of a list is naturally a list.
                 next_four = list(all_exps[last_idx + 1 : last_idx + 5])
                 heat_map_dates = list(dict.fromkeys(selected_exps + next_four))
             except (ValueError, IndexError):
@@ -312,12 +310,11 @@ try:
                 for o_type, df_h_raw in [("Call", c.calls), ("Put", c.puts)]:
                     if heat_filter != "All" and o_type != heat_filter: continue
                     df_h = df_h_raw.copy()
-                    # Keep strikes within 10% of spot for the heatmap
-                    df_h_plot = df_h[(df_h['strike'] >= spot * 0.9) & (df_h['strike'] <= spot * 1.1)]
+                    # Filter strikes near spot for better visualization
+                    df_h_plot = df_h[(df_h['strike'] >= spot * 0.95) & (df_h['strike'] <= spot * 1.05)]
                     for _, row in df_h_plot.iterrows():
                         K_h, OI_h, iv_h = float(row["strike"]), float(row["openInterest"]), float(row["impliedVolatility"])
                         if iv_h <= 0: continue
-                        # Use existing bs_greeks logic
                         g, _, _, _ = bs_greeks(spot, K_h, T_heat, risk_free, iv_h, o_type)
                         gex_h = g * OI_h * 100 * spot * spot * 0.01
                         heatmap_list.append({
@@ -326,6 +323,32 @@ try:
                             "netGEX": gex_h if o_type == "Call" else -gex_h
                         })
             except: continue
+
+        # --- RENDER THE CHART ---
+        if heatmap_list:
+            df_heat = pd.DataFrame(heatmap_list)
+            # Aggregate by expiry and strike
+            df_pivot = df_heat.groupby(['expiry', 'strike'])['netGEX'].sum().unstack().fillna(0)
+            
+            fig_heat = go.Figure(data=go.Heatmap(
+                z=df_pivot.values,
+                x=df_pivot.columns,
+                y=df_pivot.index,
+                colorscale=[[0, "red"], [0.5, "white"], [1, "green"]],
+                zmid=0,
+                hovertemplate="Expiry: %{y}<br>Strike: %{x}<br>Net GEX: %{z:,.0f}<extra></extra>"
+            ))
+            
+            fig_heat.update_layout(
+                title="Gamma Concentration by Expiry & Strike",
+                xaxis_title="Strike Price",
+                yaxis_title="Expiration Date",
+                template="plotly_dark",
+                height=500
+            )
+            st.plotly_chart(fig_heat, use_container_width=True)
+        else:
+            st.info("No data available for the Heat Map range.")
         
         
 
